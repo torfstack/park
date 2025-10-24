@@ -5,32 +5,72 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/spf13/cobra"
 	"github.com/torfstack/park/internal/config"
-	"github.com/torfstack/park/internal/sync"
+	"github.com/torfstack/park/internal/logging"
+	"github.com/torfstack/park/internal/service"
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("Usage: park [login|list|download <fileId>]")
-		return
+	var rootCmd = &cobra.Command{
+		Use:   "park",
+		Short: "Google Drive file synchronization tool",
 	}
 
-	cfg := config.Config{DriveDir: "/home/david/TestGoogleDrive"}
-	srv := sync.NewService(cfg)
-	cmd := os.Args[1]
+	var debug bool
+	rootCmd.PersistentFlags().
+		BoolVarP(&debug, "debug", "d", false, "Enable debug output")
 
-	switch cmd {
-	case "login":
-		fmt.Println("✔️  Authentication successful.")
-	case "list":
-		srv.CheckForChanges(context.Background())
-	case "download":
-		if len(os.Args) < 4 {
-			fmt.Println("Usage: park download <fileId>")
-			return
-		}
-		srv.DownloadFile(os.Args[2])
-	default:
-		fmt.Println("Unknown command:", cmd)
+	srv := service.NewService(config.LoadConfig())
+
+	var setupCmd = &cobra.Command{
+		Use:   "setup",
+		Short: "Setup and perform initial sync",
+		PreRun: func(cmd *cobra.Command, args []string) {
+			logging.LogLevelDebug = debug
+		},
+		Run: func(cmd *cobra.Command, args []string) {
+			srv.SetupAndInitialSync()
+		},
+	}
+
+	var loginCmd = &cobra.Command{
+		Use:   "login",
+		Short: "Authenticate with Google Drive",
+		PreRun: func(cmd *cobra.Command, args []string) {
+			logging.LogLevelDebug = debug
+		},
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Println("Authentication successful.")
+		},
+	}
+
+	var checkCmd = &cobra.Command{
+		Use:   "check",
+		Short: "Check for changes",
+		PreRun: func(cmd *cobra.Command, args []string) {
+			logging.LogLevelDebug = debug
+		},
+		Run: func(cmd *cobra.Command, args []string) {
+			srv.CheckForChanges(context.Background())
+		},
+	}
+
+	var listCmd = &cobra.Command{
+		Use:   "list",
+		Short: "List files",
+		PreRun: func(cmd *cobra.Command, args []string) {
+			logging.LogLevelDebug = debug
+		},
+		Run: func(cmd *cobra.Command, args []string) {
+			srv.ListFiles()
+		},
+	}
+
+	rootCmd.AddCommand(setupCmd, loginCmd, checkCmd, listCmd)
+
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
 	}
 }

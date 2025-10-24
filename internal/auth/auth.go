@@ -16,7 +16,7 @@ import (
 )
 
 func GetClient(config *oauth2.Config) *http.Client {
-	tokFile := "token.json"
+	tokFile := filepath.Join(util.HomeDir(), ".config", "park", "token.json")
 	tok, err := tokenFromFile(tokFile)
 	if err != nil {
 		tok = getTokenFromWeb(config)
@@ -53,7 +53,7 @@ func tokenFromFile(file string) (*oauth2.Token, error) {
 }
 
 func saveToken(path string, token *oauth2.Token) {
-	fmt.Printf("Saving credential file to: %s\n", path) // TODO: persist to sqlite
+	fmt.Printf("Saving token to: %s\n", path)
 	f, err := os.Create(path)
 	if err != nil {
 		panic(err)
@@ -63,7 +63,7 @@ func saveToken(path string, token *oauth2.Token) {
 }
 
 func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
-	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline) // TODO: randomize state-token?
+	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
 	fmt.Printf("Visit this URL in your browser, then paste the code here:\n%v\n", authURL)
 
 	var authCode string

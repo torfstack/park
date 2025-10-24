@@ -14,6 +14,7 @@ func CanonizePath(basePath, relPath string) (string, error) {
 	}
 	return filepath.EvalSymlinks(abs)
 }
+
 func HomeDir() string {
 	h, _ := os.UserHomeDir()
 	return h
