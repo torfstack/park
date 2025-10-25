@@ -29,11 +29,15 @@ func (s *Service) SetupAndInitialSync() {
 	if !s.cfg.IsSetup {
 		logging.Logf("Enter Google Drive directory path (default: %s): ", filepath.Join(util.HomeDir(), "GoogleDrive"))
 		var input string
-		fmt.Scanln(&input)
+		_, err := fmt.Scanln(&input)
+		if err != nil {
+			logging.Logf("Could not read input: %s", err)
+			os.Exit(1)
+		}
 		if input == "" {
 			input = filepath.Join(util.HomeDir(), "GoogleDrive")
 		}
-		err := os.MkdirAll(input, 0755)
+		err = os.MkdirAll(input, 0755)
 		if err != nil {
 			logging.Logf("Could not create Google Drive directory '%s': %s", input, err)
 			os.Exit(1)
@@ -64,7 +68,7 @@ type job struct {
 }
 
 func (s *Service) download() {
-	q := fmt.Sprintf("trashed = false")
+	q := "trashed = false"
 	var files []*drive.File
 	nextPageToken := ""
 	initial := true
@@ -142,7 +146,9 @@ func (s *Service) createDirs(files []*drive.File, syncCtx *syncContext) {
 	for _, dir := range files {
 		if dir.MimeType == FolderMimeType && dir.OwnedByMe {
 			fullpath := filepath.Join(s.cfg.DriveDir, fullPath(dir.Id, syncCtx))
-			os.MkdirAll(fullpath, 0755)
+			if err := os.MkdirAll(fullpath, 0755); err != nil {
+				panic(err)
+			}
 		}
 	}
 }
@@ -180,18 +186,29 @@ func (s *Service) downloadFile(f *drive.File, syncCtx *syncContext) error {
 	logging.LogDebugf("Downloading %s to %s", f.Name, localPath)
 
 	out, err := os.Create(localPath)
+	if err != nil {
+		return err
+	}
 
 	totalSize := res.Header.Get("Content-Length")
 	if total, err := strconv.ParseInt(totalSize, 10, 64); err == nil && total > 10*util.MB {
 		bar := progressbar.DefaultBytes(total, f.Name)
 		_, err = io.Copy(io.MultiWriter(out, bar), res.Body)
-		bar.Finish()
+		if err != nil {
+			return err
+		}
+		err = bar.Finish()
+		if err != nil {
+			return err
+		}
 	} else {
 		_, err = io.Copy(out, res.Body)
+		if err != nil {
+			return err
+		}
 	}
-	out.Close()
 
-	return nil
+	return out.Close()
 }
 
 func (s *Service) isSetupAlready() bool {

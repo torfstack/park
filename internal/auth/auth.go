@@ -59,7 +59,9 @@ func saveToken(path string, token *oauth2.Token) {
 		panic(err)
 	}
 	defer f.Close()
-	json.NewEncoder(f).Encode(token)
+	if err = json.NewEncoder(f).Encode(token); err != nil {
+		panic(err)
+	}
 }
 
 func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {

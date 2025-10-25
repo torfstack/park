@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 
 	"github.com/torfstack/park/internal/util"
-	"google.golang.org/api/drive/v3"
 )
 
 func (s *Service) CheckForChanges(ctx context.Context) {
@@ -39,19 +38,6 @@ func (s *Service) ListFiles() {
 	for _, file := range files.Files {
 		fmt.Printf("%s:%s\n", file.Id, file.Name)
 	}
-}
-
-func (s *Service) UploadFile(localPath string) {
-	absoluteLocalPath, err := util.CanonizePath(s.cfg.DriveDir, localPath)
-	if err != nil {
-		panic(err)
-	}
-	file, err := os.Open(absoluteLocalPath)
-	if err != nil {
-		panic(err)
-	}
-	f := &drive.File{Name: filepath.Base(localPath)}
-	s.drv.Files.Create(f).Media(file).Do()
 }
 
 func (s *Service) pageToken() string {
