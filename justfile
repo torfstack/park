@@ -9,3 +9,7 @@ fmt:
 dep-update:
     go get -u ./...
     go mod tidy
+
+[working-directory: 'cmd/park']
+install:
+    go install .

@@ -3,10 +3,8 @@ package service
 import (
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"sync"
 
@@ -17,8 +15,14 @@ import (
 )
 
 const (
-	FolderMimeType = "application/vnd.google-apps.folder"
+	FolderMimeType      = "application/vnd.google-apps.folder"
+	SpreadSheetMimeType = "application/vnd.google-apps.spreadsheet"
 )
+
+var NotDownloadableMimeTypes = []string{
+	FolderMimeType,
+	SpreadSheetMimeType,
+}
 
 // SetupAndInitialSync initializes the drive directory and does a first synchronization
 func (s *Service) SetupAndInitialSync() {
@@ -48,7 +52,7 @@ func (s *Service) SetupAndInitialSync() {
 		s.cfg.PersistConfig()
 	}
 	if !s.cfg.IsInitialized {
-		s.download(s.cfg.DriveDir)
+		s.download()
 		s.cfg.IsInitialized = true
 		s.cfg.PersistConfig()
 	}
@@ -56,122 +60,129 @@ func (s *Service) SetupAndInitialSync() {
 
 type job struct {
 	file    *drive.File
-	parents map[string]string
+	syncCtx *syncContext
 }
 
-func (s *Service) download(intoDir string) {
+func (s *Service) download() {
 	q := fmt.Sprintf("trashed = false")
-	files, err := s.drv.Files.List().
-		Q(q).
-		Fields("files(id, name, mimeType, parents)").
-		Do()
-	if err != nil {
-		logging.Logf("Could not list directories: %s", err)
-		os.Exit(1)
+	var files []*drive.File
+	nextPageToken := ""
+	initial := true
+	for nextPageToken != "" || initial {
+		logging.LogDebugf("Fetching files with pageToken '%s'", nextPageToken)
+		initial = false
+		fileList, err := s.drv.Files.List().
+			Q(q).
+			PageToken(nextPageToken).
+			PageSize(300).
+			Corpora("user").
+			Fields("nextPageToken, files(id, name, mimeType, parents, capabilities, ownedByMe)").
+			Do()
+		if err != nil {
+			logging.Logf("Could not list directories: %s", err)
+			os.Exit(1)
+		}
+		files = append(files, fileList.Files...)
+		nextPageToken = fileList.NextPageToken
 	}
 
-	parents := s.createDirs(files)
+	syncCtx := createSyncContext(files)
+	logging.LogDebug("Created sync context")
+
+	s.createDirs(files, syncCtx)
+	logging.LogDebug("Created initial directories")
 
 	numWorkers := 8
 	jobs := make(chan job, numWorkers)
 	results := make(chan error, numWorkers)
 
+	logging.LogDebug("Starting download workers")
 	var wg sync.WaitGroup
 	wg.Add(numWorkers)
 	for i := 0; i < numWorkers; i++ {
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				if err := s.downloadFile(j.file, j.parents); err != nil {
+				if err := s.downloadFile(j.file, syncCtx); err != nil {
 					results <- err
-					return // or continue based on desired behavior
 				}
 			}
 		}()
 	}
 
-	s.downloadFiles(files, parents, jobs)
+	s.downloadFiles(files, jobs, syncCtx)
 	close(jobs)
 
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
+	wg.Wait()
+	close(results)
 
-	for err := range results {
-		if err != nil {
-			// handle
-		}
-	}
 	logging.Log("Downloads finished!")
 
 	os.Exit(0)
 }
 
-func (s *Service) startWorker(jobs <-chan job, results chan<- error) {
-	for j := range jobs {
-		if err := s.downloadFile(j.file, j.parents); err != nil {
-			results <- err
+func createSyncContext(files []*drive.File) *syncContext {
+	fileMap := make(map[string]*drive.File)
+	parents := make(map[string]string)
+	for _, file := range files {
+		fileMap[file.Id] = file
+		if len(file.Parents) > 0 {
+			parents[file.Id] = file.Parents[0]
 		}
 	}
-
-	results <- nil
+	return &syncContext{fileMap, parents}
 }
 
-func (s *Service) createDirs(files *drive.FileList) map[string]string {
-	fileMap := make(map[string]*drive.File)
-	for _, f := range files.Files {
-		fileMap[f.Id] = f
-	}
+type syncContext struct {
+	fileMap map[string]*drive.File
+	parents map[string]string
+}
 
-	p := make(map[string]string)
-	for _, d := range files.Files {
-		if len(d.Parents) != 0 && slices.Contains(slices.Collect(maps.Keys(fileMap)), d.Parents[0]) {
-			p[d.Name] = fileMap[d.Parents[0]].Name
-		}
-	}
-
-	for _, d := range files.Files {
-		if d.MimeType == FolderMimeType {
-			fullpath := filepath.Join(s.cfg.DriveDir, fullPath(d.Name, p))
+func (s *Service) createDirs(files []*drive.File, syncCtx *syncContext) {
+	for _, dir := range files {
+		if dir.MimeType == FolderMimeType && dir.OwnedByMe {
+			fullpath := filepath.Join(s.cfg.DriveDir, fullPath(dir.Id, syncCtx))
 			os.MkdirAll(fullpath, 0755)
 		}
 	}
-
-	return p
 }
 
-func fullPath(dirName string, parents map[string]string) string {
-	for parents[dirName] != "" {
-		dirName = filepath.Join(parents[dirName], dirName)
+func fullPath(id string, syncCtx *syncContext) string {
+	parents := syncCtx.parents
+	fileMap := syncCtx.fileMap
+
+	f := fileMap[id].Name
+	// fileMap[parents[id]] != nil checks for the root directory
+	for parents[id] != "" && fileMap[parents[id]] != nil {
+		f = filepath.Join(fileMap[parents[id]].Name, f)
+		id = parents[id]
 	}
-	return dirName
+	return f
 }
 
-func (s *Service) downloadFiles(files *drive.FileList, parents map[string]string, jobs chan<- job) {
-	for _, file := range files.Files {
-		if file.MimeType != FolderMimeType {
-			jobs <- job{file, parents}
+func (s *Service) downloadFiles(files []*drive.File, jobs chan<- job, syncCtx *syncContext) {
+	for _, file := range files {
+		if file.MimeType != FolderMimeType && file.OwnedByMe && file.Capabilities.CanDownload {
+			jobs <- job{file, syncCtx}
 		}
 	}
 }
 
-func (s *Service) downloadFile(f *drive.File, parents map[string]string) error {
+func (s *Service) downloadFile(f *drive.File, syncCtx *syncContext) error {
 	res, err := s.drv.Files.Get(f.Id).Download()
 	if err != nil {
-		logging.LogDebugf("Could not download file: %s", err)
+		logging.LogDebugf("Could not download file '%s': %s", f.Name, err)
 		return err
 	}
 	defer res.Body.Close()
 
-	localPath := filepath.Join(s.cfg.DriveDir, fullPath(f.Name, parents))
+	localPath := filepath.Join(s.cfg.DriveDir, fullPath(f.Id, syncCtx))
 	logging.LogDebugf("Downloading %s to %s", f.Name, localPath)
 
 	out, err := os.Create(localPath)
 
 	totalSize := res.Header.Get("Content-Length")
-	if totalSize != "" {
-		total, _ := strconv.ParseInt(totalSize, 10, 64)
+	if total, err := strconv.ParseInt(totalSize, 10, 64); err == nil && total > 10*util.MB {
 		bar := progressbar.DefaultBytes(total, f.Name)
 		_, err = io.Copy(io.MultiWriter(out, bar), res.Body)
 		bar.Finish()
