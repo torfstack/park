@@ -29,17 +29,6 @@ func (s *Service) CheckForChanges(ctx context.Context) {
 	s.savePageToken(changes.NewStartPageToken)
 }
 
-func (s *Service) ListFiles() {
-	q := "trashed = false"
-	files, err := s.drv.Files.List().Q(q).Fields("files(id, name)").Do()
-	if err != nil {
-		panic(err)
-	}
-	for _, file := range files.Files {
-		fmt.Printf("%s:%s\n", file.Id, file.Name)
-	}
-}
-
 func (s *Service) pageToken() string {
 	pageTokenFile := filepath.Join(util.HomeDir(), ".config", "park", "pageToken.txt")
 	b, err := os.ReadFile(pageTokenFile)

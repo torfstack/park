@@ -1,14 +1,16 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"log"
+	"maps"
 	"os"
 	"path/filepath"
-	"strconv"
+	"slices"
 	"sync"
 
-	"github.com/schollz/progressbar/v3"
 	"github.com/torfstack/park/internal/logging"
 	"github.com/torfstack/park/internal/util"
 	"google.golang.org/api/drive/v3"
@@ -17,6 +19,8 @@ import (
 const (
 	FolderMimeType      = "application/vnd.google-apps.folder"
 	SpreadSheetMimeType = "application/vnd.google-apps.spreadsheet"
+	ShortcutMimeType    = "application/vnd.google-apps.shortcut"
+	RootFolderId        = "root"
 )
 
 var NotDownloadableMimeTypes = []string{
@@ -68,35 +72,19 @@ type job struct {
 }
 
 func (s *Service) download() {
-	q := "trashed = false"
-	var files []*drive.File
-	nextPageToken := ""
-	initial := true
-	for nextPageToken != "" || initial {
-		logging.LogDebugf("Fetching files with pageToken '%s'", nextPageToken)
-		initial = false
-		fileList, err := s.drv.Files.List().
-			Q(q).
-			PageToken(nextPageToken).
-			PageSize(300).
-			Corpora("user").
-			Fields("nextPageToken, files(id, name, mimeType, parents, capabilities, ownedByMe)").
-			Do()
-		if err != nil {
-			logging.Logf("Could not list directories: %s", err)
-			os.Exit(1)
-		}
-		files = append(files, fileList.Files...)
-		nextPageToken = fileList.NextPageToken
+	syncCtx := syncContext{
+		fileMap: make(map[string]*drive.File),
+		parents: make(map[string]string),
+	}
+	err := s.walkFolder(context.Background(), RootFolderId, s.cfg.DriveDir, &syncCtx)
+	if err != nil {
+		panic(err)
 	}
 
-	syncCtx := createSyncContext(files)
-	logging.LogDebug("Created sync context")
-
-	s.createDirs(files, syncCtx)
+	s.createDirs(&syncCtx)
 	logging.LogDebug("Created initial directories")
 
-	numWorkers := 8
+	numWorkers := 4
 	jobs := make(chan job, numWorkers)
 	results := make(chan error, numWorkers)
 
@@ -107,14 +95,14 @@ func (s *Service) download() {
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				if err := s.downloadFile(j.file, syncCtx); err != nil {
+				if err := s.downloadFile(j.file, &syncCtx); err != nil {
 					results <- err
 				}
 			}
 		}()
 	}
 
-	s.downloadFiles(files, jobs, syncCtx)
+	s.downloadFiles(jobs, &syncCtx)
 	close(jobs)
 
 	wg.Wait()
@@ -122,19 +110,80 @@ func (s *Service) download() {
 
 	logging.Log("Downloads finished!")
 
+	// TODO: remove after testing
 	os.Exit(0)
 }
 
-func createSyncContext(files []*drive.File) *syncContext {
-	fileMap := make(map[string]*drive.File)
-	parents := make(map[string]string)
-	for _, file := range files {
-		fileMap[file.Id] = file
-		if len(file.Parents) > 0 {
-			parents[file.Id] = file.Parents[0]
+func (s *Service) walkFolder(ctx context.Context, folderID, path string, syncCtx *syncContext) error {
+	logging.LogDebugf("Walking folder %s", path)
+	pageToken := ""
+	for {
+		req := s.drv.Files.List().
+			Q(fmt.Sprintf("'%s' in parents and trashed=false", folderID)).
+			Fields("nextPageToken, files(id, name, mimeType, parents, shortcutDetails)").
+			PageSize(1000)
+
+		if pageToken != "" {
+			req = req.PageToken(pageToken)
+		}
+
+		r, err := req.Do()
+		if err != nil {
+			return fmt.Errorf("error listing files in %s: %w", path, err)
+		}
+
+		for _, f := range r.Files {
+			// Skip any file that belongs to a shared drive
+			if f.DriveId != "" {
+				continue
+			}
+
+			fullPath := filepath.Join(path, f.Name)
+
+			switch f.MimeType {
+			case FolderMimeType:
+				if err := s.walkFolder(ctx, f.Id, fullPath, syncCtx); err != nil {
+					return err
+				}
+				syncCtx.parents[f.Id] = folderID
+				syncCtx.fileMap[f.Id] = f
+			case ShortcutMimeType:
+				shortcut := f.ShortcutDetails
+				if shortcut == nil {
+					log.Printf("Shortcut without details: %s (%s)", f.Name, f.Id)
+					continue
+				}
+
+				targetID := shortcut.TargetId
+				targetType := shortcut.TargetMimeType
+
+				if targetType == FolderMimeType {
+					// TODO: keep track of visited ids to not get into a shortcut loop
+					if err := s.walkFolder(ctx, targetID, filepath.Join(path, f.Name), syncCtx); err != nil {
+						return err
+					}
+					syncCtx.parents[targetID] = folderID
+					syncCtx.fileMap[targetID] = f
+				} else {
+					shortcutFile, err := s.drv.Files.Get(targetID).Fields("id, name").Do()
+					if err != nil {
+						return fmt.Errorf("error getting shortcut target file %s: %w", f.Name, err)
+					}
+					syncCtx.parents[shortcutFile.Id] = folderID
+					syncCtx.fileMap[shortcutFile.Id] = shortcutFile
+				}
+			default:
+				syncCtx.parents[f.Id] = folderID
+				syncCtx.fileMap[f.Id] = f
+			}
+		}
+
+		pageToken = r.NextPageToken
+		if pageToken == "" {
+			break
 		}
 	}
-	return &syncContext{fileMap, parents}
+	return nil
 }
 
 type syncContext struct {
@@ -142,9 +191,10 @@ type syncContext struct {
 	parents map[string]string
 }
 
-func (s *Service) createDirs(files []*drive.File, syncCtx *syncContext) {
+func (s *Service) createDirs(syncCtx *syncContext) {
+	files := slices.Collect(maps.Values(syncCtx.fileMap))
 	for _, dir := range files {
-		if dir.MimeType == FolderMimeType && dir.OwnedByMe {
+		if dir.MimeType == FolderMimeType {
 			fullpath := filepath.Join(s.cfg.DriveDir, fullPath(dir.Id, syncCtx))
 			if err := os.MkdirAll(fullpath, 0755); err != nil {
 				panic(err)
@@ -166,9 +216,10 @@ func fullPath(id string, syncCtx *syncContext) string {
 	return f
 }
 
-func (s *Service) downloadFiles(files []*drive.File, jobs chan<- job, syncCtx *syncContext) {
+func (s *Service) downloadFiles(jobs chan<- job, syncCtx *syncContext) {
+	files := slices.Collect(maps.Values(syncCtx.fileMap))
 	for _, file := range files {
-		if file.MimeType != FolderMimeType && file.OwnedByMe && file.Capabilities.CanDownload {
+		if file.MimeType != FolderMimeType {
 			jobs <- job{file, syncCtx}
 		}
 	}
@@ -187,25 +238,14 @@ func (s *Service) downloadFile(f *drive.File, syncCtx *syncContext) error {
 
 	out, err := os.Create(localPath)
 	if err != nil {
+		logging.LogDebugf("Could not create file '%s': %s", localPath, err)
 		return err
 	}
 
-	totalSize := res.Header.Get("Content-Length")
-	if total, err := strconv.ParseInt(totalSize, 10, 64); err == nil && total > 10*util.MB {
-		bar := progressbar.DefaultBytes(total, f.Name)
-		_, err = io.Copy(io.MultiWriter(out, bar), res.Body)
-		if err != nil {
-			return err
-		}
-		err = bar.Finish()
-		if err != nil {
-			return err
-		}
-	} else {
-		_, err = io.Copy(out, res.Body)
-		if err != nil {
-			return err
-		}
+	_, err = io.Copy(out, res.Body)
+	if err != nil {
+		logging.LogDebugf("Could not write file '%s': %s", localPath, err)
+		return err
 	}
 
 	return out.Close()

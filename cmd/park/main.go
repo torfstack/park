@@ -21,7 +21,8 @@ func main() {
 	rootCmd.PersistentFlags().
 		BoolVarP(&debug, "debug", "d", false, "Enable debug output")
 
-	srv := service.NewService(config.LoadConfig())
+	cfg := config.LoadConfig()
+	srv := service.NewService(cfg)
 
 	var setupCmd = &cobra.Command{
 		Use:   "setup",
@@ -34,17 +35,6 @@ func main() {
 		},
 	}
 
-	var loginCmd = &cobra.Command{
-		Use:   "login",
-		Short: "Authenticate with Google Drive",
-		PreRun: func(cmd *cobra.Command, args []string) {
-			logging.LogLevelDebug = debug
-		},
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("Authentication successful.")
-		},
-	}
-
 	var checkCmd = &cobra.Command{
 		Use:   "check",
 		Short: "Check for changes",
@@ -52,22 +42,15 @@ func main() {
 			logging.LogLevelDebug = debug
 		},
 		Run: func(cmd *cobra.Command, args []string) {
+			if !cfg.IsInitialized {
+				fmt.Println("Please run 'park setup' first")
+				os.Exit(1)
+			}
 			srv.CheckForChanges(context.Background())
 		},
 	}
 
-	var listCmd = &cobra.Command{
-		Use:   "list",
-		Short: "List files",
-		PreRun: func(cmd *cobra.Command, args []string) {
-			logging.LogLevelDebug = debug
-		},
-		Run: func(cmd *cobra.Command, args []string) {
-			srv.ListFiles()
-		},
-	}
-
-	rootCmd.AddCommand(setupCmd, loginCmd, checkCmd, listCmd)
+	rootCmd.AddCommand(setupCmd, checkCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
