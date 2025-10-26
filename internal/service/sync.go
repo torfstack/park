@@ -2,10 +2,10 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/torfstack/park/internal/logging"
 	"github.com/torfstack/park/internal/util"
 )
 
@@ -17,15 +17,30 @@ func (s *Service) CheckForChanges(ctx context.Context) {
 			panic(err)
 		}
 		pageToken = token.StartPageToken
+		s.savePageToken(pageToken)
 	}
-	changes, err := s.drv.Changes.List(pageToken).Fields("nextPageToken", "changes(fileId)").Do()
+	changes, err := s.drv.Changes.List(pageToken).
+		Fields("newStartPageToken, changes(changeType, fileId, file(trashed), removed)").
+		Do()
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("Changes:")
+
 	for _, change := range changes.Changes {
-		fmt.Printf("%s\n", change.FileId)
+		if change.ChangeType == "drive" {
+			logging.LogDebug("Ignoring drive change")
+			continue
+		}
+		if change.Removed || change.File.Trashed {
+			logging.LogDebugf("Removing file %s", change.FileId)
+			// TODO: Remove file from drive
+		} else {
+			logging.LogDebugf("Updating/Creating file %s", change.FileId)
+			// TODO: Download file
+		}
 	}
+
+	// Persist page token only if all changes were processed successfully for now
 	s.savePageToken(changes.NewStartPageToken)
 }
 

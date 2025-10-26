@@ -13,3 +13,6 @@ dep-update:
 [working-directory: 'cmd/park']
 install:
     go install .
+
+test:
+    go test ./...

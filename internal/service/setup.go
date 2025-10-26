@@ -1,7 +1,9 @@
 package service
 
 import (
+	"bufio"
 	"context"
+	"crypto"
 	"fmt"
 	"io"
 	"log"
@@ -9,8 +11,10 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 
+	"github.com/torfstack/park/internal/local"
 	"github.com/torfstack/park/internal/logging"
 	"github.com/torfstack/park/internal/util"
 	"google.golang.org/api/drive/v3"
@@ -33,7 +37,9 @@ func (s *Service) SetupAndInitialSync() {
 	if !s.cfg.IsSetup {
 		logging.Logf("Enter Google Drive directory path (default: %s): ", filepath.Join(util.HomeDir(), "GoogleDrive"))
 		var input string
-		_, err := fmt.Scanln(&input)
+		reader := bufio.NewReader(os.Stdin)
+		input, err := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
 		if err != nil {
 			logging.Logf("Could not read input: %s", err)
 			os.Exit(1)
@@ -91,11 +97,12 @@ func (s *Service) download() {
 	logging.LogDebug("Starting download workers")
 	var wg sync.WaitGroup
 	wg.Add(numWorkers)
+	result := newSyncResult()
 	for i := 0; i < numWorkers; i++ {
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				if err := s.downloadFile(j.file, &syncCtx); err != nil {
+				if err := s.downloadFile(j.file, &syncCtx, result); err != nil {
 					results <- err
 				}
 			}
@@ -108,10 +115,11 @@ func (s *Service) download() {
 	wg.Wait()
 	close(results)
 
-	logging.Log("Downloads finished!")
+	parkFiles := result.parkFiles.Items()
+	parkTable := local.ParkTable{Files: parkFiles}
+	parkTable.Persist()
 
-	// TODO: remove after testing
-	os.Exit(0)
+	logging.LogDebug("Downloads finished!")
 }
 
 func (s *Service) walkFolder(ctx context.Context, folderID, path string, syncCtx *syncContext) error {
@@ -191,6 +199,14 @@ type syncContext struct {
 	parents map[string]string
 }
 
+type syncResult struct {
+	parkFiles util.SyncSlice[local.ParkFile]
+}
+
+func newSyncResult() *syncResult {
+	return &syncResult{*util.NewSyncSlice[local.ParkFile]()}
+}
+
 func (s *Service) createDirs(syncCtx *syncContext) {
 	files := slices.Collect(maps.Values(syncCtx.fileMap))
 	for _, dir := range files {
@@ -225,7 +241,7 @@ func (s *Service) downloadFiles(jobs chan<- job, syncCtx *syncContext) {
 	}
 }
 
-func (s *Service) downloadFile(f *drive.File, syncCtx *syncContext) error {
+func (s *Service) downloadFile(f *drive.File, syncCtx *syncContext, syncResult *syncResult) error {
 	res, err := s.drv.Files.Get(f.Id).Download()
 	if err != nil {
 		logging.LogDebugf("Could not download file '%s': %s", f.Name, err)
@@ -242,11 +258,18 @@ func (s *Service) downloadFile(f *drive.File, syncCtx *syncContext) error {
 		return err
 	}
 
-	_, err = io.Copy(out, res.Body)
+	sha := crypto.SHA3_256.New()
+	_, err = io.Copy(io.MultiWriter(out, sha), res.Body)
 	if err != nil {
 		logging.LogDebugf("Could not write file '%s': %s", localPath, err)
 		return err
 	}
+
+	syncResult.parkFiles.Add(local.ParkFile{
+		Path:        localPath,
+		FileId:      f.Id,
+		ContentHash: sha.Sum(nil),
+	})
 
 	return out.Close()
 }

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -39,10 +41,10 @@ func (c *Config) PersistConfig() {
 func LoadConfig() Config {
 	c := Config{}
 	_, err := os.Stat(configPath())
-	if err != nil {
-		if os.IsNotExist(err) {
-			return c
-		}
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return c
+	case err != nil:
 		logging.Logf("Could not stat config file '%s': %s", configPath(), err)
 		os.Exit(1)
 	}
