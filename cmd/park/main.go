@@ -30,8 +30,8 @@ func main() {
 		PreRun: func(cmd *cobra.Command, args []string) {
 			logging.LogLevelDebug = debug
 		},
-		Run: func(cmd *cobra.Command, args []string) {
-			srv.SetupAndInitialSync()
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return srv.SetupAndInitialSync()
 		},
 	}
 
