@@ -91,15 +91,13 @@ func (s *Service) performInitialSync() error {
 	}
 	logging.LogDebug("Created initial directories")
 
-	jobs := make(chan job, NumWorkers)
-	results := make(chan local.ParkFile, NumWorkers*2)
+	jobs := make(chan job)
+	results := make(chan local.ParkFile)
 	var wg sync.WaitGroup
-	wg.Add(NumWorkers)
 
 	logging.LogDebug("Starting download workers")
 	for i := 0; i < NumWorkers; i++ {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for j := range jobs {
 				parkFile, errGo := s.downloadFile(j.file, &syncCtx)
 				if errGo != nil {
@@ -108,17 +106,20 @@ func (s *Service) performInitialSync() error {
 				}
 				results <- *parkFile
 			}
-		}()
+		})
 	}
-	s.enqueueDownloadJobs(jobs, &syncCtx)
-	close(jobs)
+	go func() {
+		s.enqueueDownloadJobs(jobs, &syncCtx)
+		close(jobs)
+		logging.LogDebug("Finished enqueueing download jobs")
+	}()
 
 	go func() {
 		wg.Wait()
 		close(results)
 	}()
 
-	parkFiles := make([]local.ParkFile, 0, len(syncCtx.fileMap)/2)
+	parkFiles := make([]local.ParkFile, 0)
 	for parkFile := range results {
 		parkFiles = append(parkFiles, parkFile)
 	}
@@ -247,7 +248,11 @@ func (s *Service) downloadFile(f *drive.File, syncCtx *syncContext) (*local.Park
 	if err != nil {
 		return nil, fmt.Errorf("could not download file '%s': %w", f.Name, err)
 	}
-	defer res.Body.Close()
+	defer func(Body io.ReadCloser) {
+		if err = Body.Close(); err != nil {
+			logging.LogDebugf("Could not close body: %s", err)
+		}
+	}(res.Body)
 
 	absoluteLocalPath := filepath.Join(s.cfg.DriveDir, localPath(f, syncCtx))
 	logging.LogDebugf("Downloading %s to %s", f.Name, absoluteLocalPath)
@@ -272,7 +277,6 @@ func (s *Service) downloadFile(f *drive.File, syncCtx *syncContext) (*local.Park
 		FileId:      f.Id,
 		ContentHash: sha.Sum(nil),
 	}, nil
-
 }
 
 func (s *Service) isSetupAlready() bool {
