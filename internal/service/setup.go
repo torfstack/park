@@ -124,7 +124,10 @@ func (s *Service) performInitialSync() error {
 		parkFiles = append(parkFiles, parkFile)
 	}
 	parkTable := local.ParkTable{Files: parkFiles}
-	parkTable.Persist()
+	err = parkTable.Persist()
+	if err != nil {
+		return fmt.Errorf("error persisting initial park table: %w", err)
+	}
 
 	logging.LogDebug("Downloads finished!")
 	return nil

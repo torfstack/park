@@ -17,7 +17,7 @@ type ParkTable struct {
 	Files []ParkFile
 }
 
-func (p *ParkTable) Persist() {
+func (p *ParkTable) Persist() error {
 	f, err := os.OpenFile(parkTablePath(), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	if err != nil {
 		panic(err)
@@ -29,7 +29,7 @@ func (p *ParkTable) Persist() {
 			panic(err)
 		}
 	}
-	f.Sync()
+	return f.Sync()
 }
 
 func LoadParkTable() *ParkTable {
