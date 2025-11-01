@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"maps"
 	"os"
 	"path/filepath"
@@ -56,7 +55,9 @@ func (s *Service) SetupAndInitialSync() error {
 		}
 		s.cfg.DriveDir = input
 		s.cfg.IsSetup = true
-		s.cfg.PersistConfig()
+		if err = s.cfg.PersistConfig(); err != nil {
+			return fmt.Errorf("could not persist config: %w", err)
+		}
 	}
 	if !s.cfg.IsInitialized {
 		err := s.performInitialSync()
@@ -64,7 +65,9 @@ func (s *Service) SetupAndInitialSync() error {
 			return fmt.Errorf("could not perform initial sync: %w", err)
 		}
 		s.cfg.IsInitialized = true
-		s.cfg.PersistConfig()
+		if err = s.cfg.PersistConfig(); err != nil {
+			return fmt.Errorf("could not persist config: %w", err)
+		}
 	}
 	return nil
 }
@@ -151,49 +154,9 @@ func (s *Service) walkFolder(ctx context.Context, folderID, path string, syncCtx
 		}
 
 		for _, f := range r.Files {
-			// Skip any file that belongs to a shared drive
-			if f.DriveId != "" {
+			if err = s.handleFile(ctx, f, folderID, path, syncCtx); err != nil {
+				logging.Logf("error handling file %s: %w", f.Name, err)
 				continue
-			}
-
-			fullPath := filepath.Join(path, f.Name)
-
-			switch f.MimeType {
-			case FolderMimeType:
-				if err := s.walkFolder(ctx, f.Id, fullPath, syncCtx); err != nil {
-					return err
-				}
-				syncCtx.parents[f.Id] = folderID
-				syncCtx.fileMap[f.Id] = f
-			case ShortcutMimeType:
-				shortcut := f.ShortcutDetails
-				if shortcut == nil {
-					log.Printf("Shortcut without details: %s (%s)", f.Name, f.Id)
-					continue
-				}
-
-				targetID := shortcut.TargetId
-				targetType := shortcut.TargetMimeType
-
-				if targetType == FolderMimeType {
-					// TODO: keep track of visited ids to not get into a shortcut loop
-					if err = s.walkFolder(ctx, targetID, filepath.Join(path, f.Name), syncCtx); err != nil {
-						return fmt.Errorf("error walking shortcut folder %s: %w", f.Name, err)
-					}
-					syncCtx.parents[targetID] = folderID
-					syncCtx.fileMap[targetID] = f
-				} else {
-					var shortcutFile *drive.File
-					shortcutFile, err = s.drv.Files.Get(targetID).Fields("id, name").Do()
-					if err != nil {
-						return fmt.Errorf("error getting shortcut target file %s: %w", f.Name, err)
-					}
-					syncCtx.parents[shortcutFile.Id] = folderID
-					syncCtx.fileMap[shortcutFile.Id] = shortcutFile
-				}
-			default:
-				syncCtx.parents[f.Id] = folderID
-				syncCtx.fileMap[f.Id] = f
 			}
 		}
 
@@ -202,6 +165,52 @@ func (s *Service) walkFolder(ctx context.Context, folderID, path string, syncCtx
 			break
 		}
 	}
+	return nil
+}
+
+func (s *Service) handleFile(ctx context.Context, f *drive.File, folderId, path string, syncCtx *syncContext) error {
+	if f.DriveId != "" {
+		return nil
+	}
+
+	fullPath := filepath.Join(path, f.Name)
+
+	switch f.MimeType {
+	case FolderMimeType:
+		if err := s.walkFolder(ctx, f.Id, fullPath, syncCtx); err != nil {
+			return fmt.Errorf("error walking folder %s: %w", f.Name, err)
+		}
+		syncCtx.parents[f.Id] = folderId
+		syncCtx.fileMap[f.Id] = f
+	case ShortcutMimeType:
+		shortcut := f.ShortcutDetails
+		if shortcut == nil {
+			return fmt.Errorf("shortcut without details: %s (%s)", f.Name, f.Id)
+		}
+
+		targetID := shortcut.TargetId
+		targetType := shortcut.TargetMimeType
+
+		if targetType == FolderMimeType {
+			// TODO: keep track of visited ids to not get into a shortcut loop
+			if err := s.walkFolder(ctx, targetID, filepath.Join(path, f.Name), syncCtx); err != nil {
+				return fmt.Errorf("error walking shortcut folder %s: %w", f.Name, err)
+			}
+			syncCtx.parents[targetID] = folderId
+			syncCtx.fileMap[targetID] = f
+		} else {
+			shortcutFile, err := s.drv.Files.Get(targetID).Fields("id, name").Do()
+			if err != nil {
+				return fmt.Errorf("error getting shortcut target file %s: %w", f.Name, err)
+			}
+			syncCtx.parents[shortcutFile.Id] = folderId
+			syncCtx.fileMap[shortcutFile.Id] = shortcutFile
+		}
+	default:
+		syncCtx.parents[f.Id] = folderId
+		syncCtx.fileMap[f.Id] = f
+	}
+
 	return nil
 }
 

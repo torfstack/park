@@ -21,8 +21,16 @@ func main() {
 	rootCmd.PersistentFlags().
 		BoolVarP(&debug, "debug", "d", false, "Enable debug output")
 
-	cfg := config.LoadConfig()
-	srv := service.NewService(cfg)
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		logging.Logf("Could not load config: %s", err)
+		os.Exit(1)
+	}
+	srv, err := service.NewService(context.Background(), cfg)
+	if err != nil {
+		logging.Logf("Could not create service: %s", err)
+		os.Exit(1)
+	}
 
 	var setupCmd = &cobra.Command{
 		Use:   "setup",
@@ -43,7 +51,7 @@ func main() {
 		},
 		Run: func(cmd *cobra.Command, args []string) {
 			if !cfg.IsInitialized {
-				fmt.Println("Please run 'park setup' first")
+				logging.Log("Please run 'park setup' first")
 				os.Exit(1)
 			}
 			srv.CheckForChanges(context.Background())

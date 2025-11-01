@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -17,51 +18,40 @@ type Config struct {
 	DriveDir      string `toml:"drive_dir"`
 }
 
-func (c *Config) PersistConfig() {
+func (c *Config) PersistConfig() error {
 	err := os.MkdirAll(configDirPath(), 0755)
 	if err != nil {
-		logging.Logf("Could not create config directory '%s': %s", configDirPath(), err)
-		os.Exit(1)
+		return fmt.Errorf("could not create config directory '%s': %s", configDirPath(), err)
 	}
 
 	f, err := os.OpenFile(configPath(), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	if err != nil {
-		logging.Logf("Could not open config file for writing '%s': %s", configPath(), err)
-		os.Exit(1)
+		return fmt.Errorf("could not open config file for writing '%s': %s", configPath(), err)
 	}
 
 	logging.LogDebugf("Persisting config file to '%s'", configPath())
 	err = toml.NewEncoder(f).Encode(c)
 	if err != nil {
-		logging.Logf("Could not persist config to file '%s': %s", configPath(), err)
-		os.Exit(1)
+		return fmt.Errorf("could not persist config to file '%s': %s", configPath(), err)
 	}
+	return nil
 }
 
-func LoadConfig() Config {
+func LoadConfig() (Config, error) {
 	c := Config{}
-	_, err := os.Stat(configPath())
+	f, err := os.Open(configPath())
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return c
+		return c, nil
 	case err != nil:
-		logging.Logf("Could not stat config file '%s': %s", configPath(), err)
-		os.Exit(1)
-	}
-
-	f, err := os.Open(configPath())
-	if err != nil {
-		logging.Logf("Could not open config file for reading '%s': %s", configPath(), err)
-		os.Exit(1)
+		return c, fmt.Errorf("could not open config file for reading '%s': %s", configPath(), err)
 	}
 
 	_, err = toml.NewDecoder(f).Decode(&c)
 	if err != nil {
-		logging.Logf("Could not decode config file '%s': %s", configPath(), err)
-		os.Exit(1)
+		return c, fmt.Errorf("could not decode config file '%s': %s", configPath(), err)
 	}
-
-	return c
+	return c, nil
 }
 
 func configPath() string {

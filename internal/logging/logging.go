@@ -1,6 +1,8 @@
 package logging
 
-import "fmt"
+import (
+	"fmt"
+)
 
 var (
 	LogLevelDebug = false
