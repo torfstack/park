@@ -6,9 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 
 	"github.com/torfstack/park/internal/logging"
 	"github.com/torfstack/park/internal/util"
@@ -16,6 +19,10 @@ import (
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
+)
+
+var (
+	errTokenNoLongerValid = errors.New("token on disk is no longer valid")
 )
 
 func DriveService(ctx context.Context) (*drive.Service, error) {
@@ -34,14 +41,19 @@ func DriveService(ctx context.Context) (*drive.Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not get client for drive service: %w", err)
 	}
-	return drive.NewService(ctx, option.WithHTTPClient(client))
+
+	drv, err := drive.NewService(ctx, option.WithHTTPClient(client))
+	if err != nil {
+		return nil, fmt.Errorf("could not create drive service: %w", err)
+	}
+	return drv, nil
 }
 
 func getClient(ctx context.Context, config *oauth2.Config) (*http.Client, error) {
 	tokFile := filepath.Join(util.HomeDir(), ".config", "park", "token.json")
 	tok, err := tokenFromFile(tokFile)
 	switch {
-	case errors.Is(err, fs.ErrNotExist):
+	case errors.Is(err, fs.ErrNotExist) || errors.Is(err, errTokenNoLongerValid):
 		tok, err = getTokenFromWeb(ctx, config)
 		if err != nil {
 			return nil, fmt.Errorf("could not get token from web: %w", err)
@@ -72,6 +84,9 @@ func tokenFromFile(file string) (*oauth2.Token, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not decode token file: %w", err)
 	}
+	if !tok.Valid() {
+		return nil, errTokenNoLongerValid
+	}
 	return &tok, nil
 }
 
@@ -94,18 +109,73 @@ func saveToken(path string, token *oauth2.Token) error {
 }
 
 func getTokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token, error) {
-	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
-	fmt.Printf("Visit this URL in your browser, then paste the code here:\n%v\n", authURL)
+	localPort := 8080
+	redirectURL := fmt.Sprintf("http://localhost:%d", localPort)
+	config.RedirectURL = redirectURL
 
-	var authCode string
-	fmt.Print("Enter the code: ")
-	if _, err := fmt.Scan(&authCode); err != nil {
-		return nil, fmt.Errorf("could not read auth code: %w", err)
+	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
+
+	logging.Logf("Trying to open your browser to visit the URL to authorize this application: %s", authURL)
+	openBrowser(authURL)
+
+	codeCh := make(chan string)
+	srv := &http.Server{Addr: fmt.Sprintf(":%d", localPort)}
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if errMsg := r.FormValue("error"); errMsg != "" {
+			http.Error(w, errMsg, http.StatusBadRequest)
+			codeCh <- ""
+			return
+		}
+		code := r.FormValue("code")
+		_, err := fmt.Fprintln(w, "Authorization successful! You can close this tab.")
+		if err != nil {
+			logging.Logf("Could not write response to client: %s", err)
+			return
+		}
+
+		codeCh <- code
+
+		// Shut down server after handling
+		go func() { _ = srv.Shutdown(ctx) }()
+	})
+
+	go func() {
+		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("ListenAndServe: %v", err)
+		}
+	}()
+
+	logging.Log("Waiting for successful login... ")
+	code := <-codeCh
+	if code == "" {
+		log.Fatal("No code received")
 	}
 
-	tok, err := config.Exchange(ctx, authCode)
+	tok, err := config.Exchange(ctx, code)
 	if err != nil {
 		return nil, fmt.Errorf("could not exchange auth code: %w", err)
 	}
+	logging.Log("Login successful!")
 	return tok, nil
+}
+
+func openBrowser(url string) {
+	var err error
+
+	switch runtime.GOOS {
+	case "linux":
+		err = exec.Command("xdg-open", url).Start()
+	case "windows":
+		err = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	case "darwin":
+		err = exec.Command("open", url).Start()
+	default:
+		fmt.Printf("Please open the following URL manually: %s\n", url)
+	}
+
+	if err != nil {
+		fmt.Printf("Failed to open browser automatically: %v\n", err)
+		fmt.Printf("Visit this URL manually: %s\n", url)
+	}
 }
