@@ -38,8 +38,12 @@ func main() {
 		PreRun: func(cmd *cobra.Command, args []string) {
 			logging.LogLevelDebug = debug
 		},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return srv.SetupAndInitialSync()
+		Run: func(cmd *cobra.Command, args []string) {
+			err = srv.SetupAndInitialSync(cmd.Context())
+			if err != nil {
+				logging.Logf("Could not setup and perform initial sync: %s", err)
+				os.Exit(1)
+			}
 		},
 	}
 
@@ -54,7 +58,11 @@ func main() {
 				logging.Log("Please run 'park setup' first")
 				os.Exit(1)
 			}
-			srv.CheckForChanges(context.Background())
+			err = srv.CheckForChanges(cmd.Context())
+			if err != nil {
+				logging.Logf("Could not check for changes: %s", err)
+				os.Exit(1)
+			}
 		},
 	}
 

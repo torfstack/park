@@ -29,7 +29,7 @@ const (
 )
 
 // SetupAndInitialSync initializes the drive directory and does a first synchronization
-func (s *Service) SetupAndInitialSync() error {
+func (s *Service) SetupAndInitialSync(ctx context.Context) error {
 	if !s.cfg.IsSetup {
 		logging.Logf("Enter Google Drive directory path (default: %s): ", filepath.Join(util.HomeDir(), "GoogleDrive"))
 		var input string
@@ -60,7 +60,7 @@ func (s *Service) SetupAndInitialSync() error {
 		}
 	}
 	if !s.cfg.IsInitialized {
-		err := s.performInitialSync()
+		err := s.performInitialSync(ctx)
 		if err != nil {
 			return fmt.Errorf("could not perform initial sync: %w", err)
 		}
@@ -77,13 +77,13 @@ type job struct {
 	syncCtx *syncContext
 }
 
-func (s *Service) performInitialSync() error {
+func (s *Service) performInitialSync(ctx context.Context) error {
 	syncCtx := syncContext{
 		fileMap: make(map[string]*drive.File),
 		parents: make(map[string]string),
 	}
 
-	err := s.walkFolder(context.Background(), RootFolderId, s.cfg.DriveDir, &syncCtx)
+	err := s.walkFolder(ctx, RootFolderId, s.cfg.DriveDir, &syncCtx)
 	if err != nil {
 		return fmt.Errorf("error walking root folder: %w", err)
 	}
@@ -122,11 +122,11 @@ func (s *Service) performInitialSync() error {
 		close(results)
 	}()
 
-	parkFiles := make([]local.ParkFile, 0)
+	parkFiles := make(map[string]local.ParkFile)
 	for parkFile := range results {
-		parkFiles = append(parkFiles, parkFile)
+		parkFiles[parkFile.FileId] = parkFile
 	}
-	parkTable := local.ParkTable{Files: parkFiles}
+	parkTable := local.NewParkTable(s.cfg, parkFiles)
 	err = parkTable.Persist()
 	if err != nil {
 		return fmt.Errorf("error persisting initial park table: %w", err)
