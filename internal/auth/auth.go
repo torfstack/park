@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/torfstack/park/internal/logging"
 	"github.com/torfstack/park/internal/util"
@@ -109,17 +111,45 @@ func saveToken(path string, token *oauth2.Token) error {
 }
 
 func getTokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token, error) {
-	localPort := 8080
-	redirectURL := fmt.Sprintf("http://localhost:%d", localPort)
-	config.RedirectURL = redirectURL
+	port, err := startOAuthCallbackServer(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("could not start OAuth callback server: %w", err)
+	}
 
+	redirectURL := fmt.Sprintf("http://localhost:%d", port)
+	config.RedirectURL = redirectURL
 	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
 
 	logging.Logf("Trying to open your browser to visit the URL to authorize this application: %s", authURL)
 	openBrowser(authURL)
 
-	codeCh := make(chan string)
-	srv := &http.Server{Addr: fmt.Sprintf(":%d", localPort)}
+	code, err := waitForAuthCode(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("could not complete OAuth flow: %w", err)
+	}
+
+	tok, err := config.Exchange(ctx, code)
+	if err != nil {
+		return nil, fmt.Errorf("could not exchange auth code: %w", err)
+	}
+
+	logging.Log("Login successful!")
+	return tok, nil
+}
+
+var codeCh chan string
+
+func startOAuthCallbackServer(ctx context.Context) (int, error) {
+	codeCh = make(chan string)
+
+	// Use port 0 to let the OS assign a free port
+	listener, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		return 0, fmt.Errorf("could not create listener: %w", err)
+	}
+
+	port := listener.Addr().(*net.TCPAddr).Port
+	srv := &http.Server{}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if errMsg := r.FormValue("error"); errMsg != "" {
@@ -128,36 +158,38 @@ func getTokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token,
 			return
 		}
 		code := r.FormValue("code")
-		_, err := fmt.Fprintln(w, "Authorization successful! You can close this tab.")
+		_, err = fmt.Fprintln(w, "Authorization successful! You can close this window now.")
 		if err != nil {
 			logging.Logf("Could not write response to client: %s", err)
 			return
 		}
-
 		codeCh <- code
-
 		// Shut down server after handling
 		go func() { _ = srv.Shutdown(ctx) }()
 	})
 
 	go func() {
-		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("ListenAndServe: %v", err)
+		if err = srv.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("Serve: %v", err)
 		}
 	}()
 
-	logging.Log("Waiting for successful login... ")
-	code := <-codeCh
-	if code == "" {
-		log.Fatal("No code received")
-	}
+	return port, nil
+}
 
-	tok, err := config.Exchange(ctx, code)
-	if err != nil {
-		return nil, fmt.Errorf("could not exchange auth code: %w", err)
+func waitForAuthCode(ctx context.Context) (string, error) {
+	logging.Log("Waiting for successful login... ")
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case code := <-codeCh:
+		if code == "" {
+			return "", fmt.Errorf("no authorization code received")
+		}
+		return code, nil
+	case <-time.After(10 * time.Minute):
+		return "", fmt.Errorf("timed out waiting for authorization code")
 	}
-	logging.Log("Login successful!")
-	return tok, nil
 }
 
 func openBrowser(url string) {
