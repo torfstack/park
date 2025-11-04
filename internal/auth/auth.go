@@ -86,9 +86,6 @@ func tokenFromFile(file string) (*oauth2.Token, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not decode token file: %w", err)
 	}
-	if !tok.Valid() {
-		return nil, errTokenNoLongerValid
-	}
 	return &tok, nil
 }
 
