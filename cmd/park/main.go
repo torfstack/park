@@ -41,7 +41,7 @@ func main() {
 		Run: func(cmd *cobra.Command, args []string) {
 			err = srv.SetupAndInitialSync(cmd.Context())
 			if err != nil {
-				logging.Logf("Could not setup and perform initial sync: %s", err)
+				logging.LogError("main: error while running setup cmd", err)
 				os.Exit(1)
 			}
 		},
@@ -60,13 +60,32 @@ func main() {
 			}
 			err = srv.CheckForChanges(cmd.Context())
 			if err != nil {
-				logging.Logf("Could not check for changes: %s", err)
+				logging.LogError("main: error while running check cmd", err)
 				os.Exit(1)
 			}
 		},
 	}
 
-	rootCmd.AddCommand(setupCmd, checkCmd)
+	var daemonCmd = &cobra.Command{
+		Use:   "daemon",
+		Short: "Run in daemon mode (watch for changes and sync)",
+		PreRun: func(cmd *cobra.Command, args []string) {
+			logging.LogLevelDebug = debug
+		},
+		Run: func(cmd *cobra.Command, args []string) {
+			if !cfg.IsInitialized {
+				logging.Log("Please run 'park setup' first")
+				os.Exit(1)
+			}
+			err = srv.RunDaemon(cmd.Context())
+			if err != nil {
+				logging.LogError("main: error while running daemon cmd", err)
+				os.Exit(1)
+			}
+		},
+	}
+
+	rootCmd.AddCommand(setupCmd, checkCmd, daemonCmd)
 
 	if err = rootCmd.Execute(); err != nil {
 		fmt.Println(err)

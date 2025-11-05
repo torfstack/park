@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"errors"
 	"fmt"
 )
 
@@ -17,6 +18,17 @@ func Logf(msg string, args ...interface{}) {
 	fmt.Println(msg)
 }
 
+func LogError(msg string, err error) {
+	Log(msg)
+	for err != nil {
+		Log(err.Error())
+		if unwrap := errors.Unwrap(err); unwrap != nil {
+			err = unwrap
+		} else {
+			break
+		}
+	}
+}
 func LogDebug(msg string) {
 	if LogLevelDebug {
 		Log(msg)
