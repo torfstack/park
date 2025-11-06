@@ -10,21 +10,17 @@ import (
 	"github.com/torfstack/park/internal/logging"
 )
 
-// WatchEvent represents a file system event we care about.
 type WatchEvent struct {
 	Path string
 	Op   fsnotify.Op
 }
 
-// Watcher manages the fsnotify instance and event channel.
 type Watcher struct {
-	watcher *fsnotify.Watcher
-	// Events is the channel used to send events back to the main loop.
+	watcher  *fsnotify.Watcher
 	Events   chan WatchEvent
 	RootPath string
 }
 
-// NewWatcher creates and initializes the file system watcher.
 func NewWatcher(rootPath string) (*Watcher, error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -37,7 +33,7 @@ func NewWatcher(rootPath string) (*Watcher, error) {
 		RootPath: rootPath,
 	}
 
-	// NOTE: fsnotify does not recursively watch directories. We add them manually.
+	// NOTE: fsnotify does not recursively watch subdirectories
 	err = filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -56,7 +52,6 @@ func NewWatcher(rootPath string) (*Watcher, error) {
 	return w, nil
 }
 
-// addDir adds a new directory to the watcher. Used when a new directory is created locally or remotely.
 func (w *Watcher) addDir(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -73,7 +68,6 @@ func (w *Watcher) addDir(path string) error {
 	return nil
 }
 
-// Close closes the underlying fsnotify watcher.
 func (w *Watcher) Close() {
 	close(w.Events)
 	if err := w.watcher.Close(); err != nil {
@@ -81,7 +75,6 @@ func (w *Watcher) Close() {
 	}
 }
 
-// Run starts listening for file system events and sends them to the Events channel.
 func (w *Watcher) Run(_ context.Context) error {
 	for {
 		select {
@@ -90,13 +83,11 @@ func (w *Watcher) Run(_ context.Context) error {
 				return nil
 			}
 
-			// We only care about events happening within our sync root
 			relativePath, err := filepath.Rel(w.RootPath, event.Name)
 			if err != nil || relativePath == ".." || event.Name == w.RootPath {
 				continue
 			}
 
-			// Handle file creation in case it's a new directory that needs to be added to the watch list
 			if event.Op&fsnotify.Create == fsnotify.Create {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
 					err = w.addDir(event.Name)
@@ -106,7 +97,6 @@ func (w *Watcher) Run(_ context.Context) error {
 				}
 			}
 
-			// Send the event to the main processing loop
 			w.Events <- WatchEvent{Path: event.Name, Op: event.Op}
 
 		case err, ok := <-w.watcher.Errors:
