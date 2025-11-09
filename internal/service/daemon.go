@@ -24,18 +24,15 @@ func (s *Service) RunDaemon(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) consumeWatcherEvents(c <-chan local.WatchEvent) {
-	for {
-		select {
-		case event := <-c:
-			switch {
-			case event.Op&fsnotify.Create == fsnotify.Create:
-				logging.LogDebugf("Received create event: %s", event)
-			case event.Op&fsnotify.Write == fsnotify.Write:
-				logging.LogDebugf("Received write event: %s", event)
-			case event.Op&fsnotify.Remove == fsnotify.Remove:
-				logging.LogDebugf("Received remove event: %s", event)
-			}
+func (s *Service) consumeWatcherEvents(c <-chan fsnotify.Event) {
+	for event := range c {
+		switch {
+		case event.Has(fsnotify.Create):
+			logging.LogDebugf("Received create event: %s", event)
+		case event.Has(fsnotify.Write):
+			logging.LogDebugf("Received write event: %s", event)
+		case event.Has(fsnotify.Remove):
+			logging.LogDebugf("Received remove event: %s", event)
 		}
 	}
 }

@@ -10,14 +10,9 @@ import (
 	"github.com/torfstack/park/internal/logging"
 )
 
-type WatchEvent struct {
-	Path string
-	Op   fsnotify.Op
-}
-
 type Watcher struct {
 	watcher  *fsnotify.Watcher
-	Events   chan WatchEvent
+	Events   chan fsnotify.Event
 	RootPath string
 }
 
@@ -29,7 +24,7 @@ func NewWatcher(rootPath string) (*Watcher, error) {
 
 	w := &Watcher{
 		watcher:  watcher,
-		Events:   make(chan WatchEvent),
+		Events:   make(chan fsnotify.Event),
 		RootPath: rootPath,
 	}
 
@@ -55,14 +50,13 @@ func NewWatcher(rootPath string) (*Watcher, error) {
 func (w *Watcher) addDir(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {
-		return fmt.Errorf("add-dir: could not stat directory: %w", err)
+		return fmt.Errorf("add-dir; could not stat directory: %w", err)
 	}
 	if !info.IsDir() {
 		return nil
 	}
-
 	if err = w.watcher.Add(path); err != nil {
-		return fmt.Errorf("add-dir: could not add directory to watcher: %w", err)
+		return fmt.Errorf("add-dir; could not add directory to watcher: %w", err)
 	}
 	logging.LogDebugf("Added directory to watcher: %s", path)
 	return nil
@@ -88,16 +82,12 @@ func (w *Watcher) Run(_ context.Context) error {
 				continue
 			}
 
-			if event.Op&fsnotify.Create == fsnotify.Create {
-				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-					err = w.addDir(event.Name)
-					if err != nil {
-						return fmt.Errorf("add-dir: could not add directory to watcher: %w", err)
-					}
-				}
+			err = w.handle(event)
+			if err != nil {
+				return fmt.Errorf("run; could not handle event: %w", err)
 			}
 
-			w.Events <- WatchEvent{Path: event.Name, Op: event.Op}
+			w.Events <- event
 
 		case err, ok := <-w.watcher.Errors:
 			if !ok {
@@ -106,4 +96,21 @@ func (w *Watcher) Run(_ context.Context) error {
 			logging.Logf("FSNotify Error: %v", err)
 		}
 	}
+}
+
+func (w *Watcher) handle(event fsnotify.Event) error {
+	switch {
+	case event.Has(fsnotify.Create):
+		return w.addDir(event.Name)
+	case event.Has(fsnotify.Write):
+		// Nothing to do yet
+	case event.Has(fsnotify.Remove):
+		// Nothing to do yet, fsnotify stops watching directories when they are removed
+	case event.Has(fsnotify.Rename):
+		// Nothing to do yet, fsnotify stops watching directories when they are removed
+		// A rename is followed by a create event
+	default:
+		logging.LogDebugf("Ignoring event: %s", event)
+	}
+	return nil
 }

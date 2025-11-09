@@ -29,6 +29,7 @@ func LogError(msg string, err error) {
 		}
 	}
 }
+
 func LogDebug(msg string) {
 	if LogLevelDebug {
 		Log(msg)
