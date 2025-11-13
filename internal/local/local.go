@@ -87,7 +87,7 @@ func (p *ParkTable) Create(id, name string, content io.ReadCloser) error {
 		}
 	}(content)
 	var f *ParkFile
-	f, err := create(content, filepath.Join(p.config.DriveDir, name), id)
+	f, err := create(content, filepath.Join(p.config.LocalDir, name), id)
 	if err != nil {
 		return fmt.Errorf("could not create file: %w", err)
 	}

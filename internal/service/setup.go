@@ -53,7 +53,7 @@ func (s *Service) SetupAndInitialSync(ctx context.Context) error {
 		if len(entries) > 0 {
 			return errors.New("directory is not empty. Please specify an empty directory")
 		}
-		s.cfg.DriveDir = input
+		s.cfg.LocalDir = input
 		s.cfg.IsSetup = true
 		if err = s.cfg.PersistConfig(); err != nil {
 			return fmt.Errorf("could not persist config: %w", err)
@@ -83,7 +83,7 @@ func (s *Service) performInitialSync(ctx context.Context) error {
 		parents: make(map[string]string),
 	}
 
-	err := s.walkFolder(ctx, RootFolderId, s.cfg.DriveDir, &syncCtx)
+	err := s.walkFolder(ctx, RootFolderId, s.cfg.LocalDir, &syncCtx)
 	if err != nil {
 		return fmt.Errorf("error walking root folder: %w", err)
 	}
@@ -223,7 +223,7 @@ func (s *Service) createDirs(syncCtx *syncContext) error {
 	files := slices.Collect(maps.Values(syncCtx.fileMap))
 	for _, f := range files {
 		if f.MimeType == FolderMimeType {
-			path := filepath.Join(s.cfg.DriveDir, localPath(f, syncCtx))
+			path := filepath.Join(s.cfg.LocalDir, localPath(f, syncCtx))
 			if err := os.MkdirAll(path, 0755); err != nil {
 				return err
 			}
@@ -266,7 +266,7 @@ func (s *Service) downloadFile(f *drive.File, syncCtx *syncContext) (*local.Park
 		}
 	}(res.Body)
 
-	absoluteLocalPath := filepath.Join(s.cfg.DriveDir, localPath(f, syncCtx))
+	absoluteLocalPath := filepath.Join(s.cfg.LocalDir, localPath(f, syncCtx))
 	logging.LogDebugf("Downloading %s to %s", f.Name, absoluteLocalPath)
 
 	out, err := os.Create(absoluteLocalPath)
@@ -294,5 +294,5 @@ func (s *Service) downloadFile(f *drive.File, syncCtx *syncContext) (*local.Park
 func (s *Service) isSetupAlready() bool {
 	return s.cfg.IsSetup &&
 		s.cfg.IsInitialized &&
-		s.cfg.DriveDir != ""
+		s.cfg.LocalDir != ""
 }

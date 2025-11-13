@@ -1,63 +1,76 @@
 package config
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/torfstack/park/internal/logging"
 	"github.com/torfstack/park/internal/util"
 )
 
+var (
+	configFilePath  = filepath.Join(util.HomeDir(), ".config", "park", "config.toml")
+	defaultDriveDir = filepath.Join(util.HomeDir(), "drive")
+	inputFile       = os.Stdin
+)
+
 type Config struct {
-	IsSetup       bool   `toml:"is_setup"`
-	IsInitialized bool   `toml:"is_initialized"`
-	DriveDir      string `toml:"drive_dir"`
+	LocalDir string `toml:"local_dir"`
 }
 
-func (c *Config) PersistConfig() error {
-	err := os.MkdirAll(configDirPath(), 0755)
-	if err != nil {
-		return fmt.Errorf("could not create config directory '%s': %s", configDirPath(), err)
-	}
-
-	f, err := os.OpenFile(configPath(), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("could not open config file for writing '%s': %s", configPath(), err)
-	}
-
-	logging.LogDebugf("Persisting config file to '%s'", configPath())
-	err = toml.NewEncoder(f).Encode(c)
-	if err != nil {
-		return fmt.Errorf("could not persist config to file '%s': %s", configPath(), err)
-	}
-	return nil
-}
-
-func LoadConfig() (Config, error) {
+func Get(interactive bool) (Config, error) {
 	c := Config{}
-	f, err := os.Open(configPath())
+	f, err := os.Open(configFilePath)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return c, nil
+		return initConfig(interactive)
 	case err != nil:
-		return c, fmt.Errorf("could not open config file for reading '%s': %s", configPath(), err)
+		return c, fmt.Errorf("could not open config file for reading '%s': %s", configFilePath, err)
 	}
 
 	_, err = toml.NewDecoder(f).Decode(&c)
 	if err != nil {
-		return c, fmt.Errorf("could not decode config file '%s': %s", configPath(), err)
+		return c, fmt.Errorf("could not decode config file '%s': %s", configFilePath, err)
 	}
 	return c, nil
 }
 
-func configPath() string {
-	return filepath.Join(configDirPath(), "config.toml")
+func initConfig(interactive bool) (Config, error) {
+	c := Config{LocalDir: defaultDriveDir}
+	if interactive {
+		reader := bufio.NewReader(inputFile)
+		fmt.Printf("Enter local directory path for drive to sync to [default: %s]: ", c.LocalDir)
+		input, err := reader.ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return c, fmt.Errorf("could not read user input: %w", err)
+		}
+
+		input = strings.TrimSpace(input)
+		if input != "" {
+			c.LocalDir = input
+		}
+	}
+	return c, c.persist()
 }
 
-func configDirPath() string {
-	return util.HomeDir() + "/.config/park"
+func (c *Config) persist() error {
+	f, err := util.OpenWithParents(configFilePath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("could not open config file for writing '%s': %w", configFilePath, err)
+	}
+
+	logging.LogDebugf("Persisting config file to '%s'", configFilePath)
+	err = toml.NewEncoder(f).Encode(c)
+	if err != nil {
+		return fmt.Errorf("could not persist config to file '%s': %w", configFilePath, err)
+	}
+
+	return nil
 }

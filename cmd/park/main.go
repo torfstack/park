@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -21,48 +20,18 @@ func main() {
 	rootCmd.PersistentFlags().
 		BoolVarP(&debug, "debug", "d", false, "Enable debug output")
 
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		logging.Logf("Could not load config: %s", err)
-		os.Exit(1)
-	}
-	srv, err := service.NewService(context.Background(), cfg)
-	if err != nil {
-		logging.Logf("Could not create service: %s", err)
-		os.Exit(1)
-	}
-
-	var setupCmd = &cobra.Command{
-		Use:   "setup",
-		Short: "Setup and perform initial sync",
+	var configCmd = &cobra.Command{
+		Use:   "config",
+		Short: "Setup config",
 		PreRun: func(cmd *cobra.Command, args []string) {
 			logging.LogLevelDebug = debug
 		},
-		Run: func(cmd *cobra.Command, args []string) {
-			err = srv.SetupAndInitialSync(cmd.Context())
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := config.Get(true)
 			if err != nil {
-				logging.LogError("main: error while running setup cmd", err)
-				os.Exit(1)
+				return fmt.Errorf("main; error while running setup cmd: %w", err)
 			}
-		},
-	}
-
-	var checkCmd = &cobra.Command{
-		Use:   "check",
-		Short: "Check for changes",
-		PreRun: func(cmd *cobra.Command, args []string) {
-			logging.LogLevelDebug = debug
-		},
-		Run: func(cmd *cobra.Command, args []string) {
-			if !cfg.IsInitialized {
-				logging.Log("Please run 'park setup' first")
-				os.Exit(1)
-			}
-			err = srv.CheckForChanges(cmd.Context())
-			if err != nil {
-				logging.LogError("main: error while running check cmd", err)
-				os.Exit(1)
-			}
+			return nil
 		},
 	}
 
@@ -72,23 +41,20 @@ func main() {
 		PreRun: func(cmd *cobra.Command, args []string) {
 			logging.LogLevelDebug = debug
 		},
-		Run: func(cmd *cobra.Command, args []string) {
-			if !cfg.IsInitialized {
-				logging.Log("Please run 'park setup' first")
-				os.Exit(1)
-			}
-			err = srv.RunDaemon(cmd.Context())
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Get(false)
+			err = service.RunDaemon(cmd.Context(), cfg)
 			if err != nil {
-				logging.LogError("main: error while running daemon cmd", err)
-				os.Exit(1)
+				return fmt.Errorf("main; error while running daemon cmd: %w", err)
 			}
+			return nil
 		},
 	}
 
-	rootCmd.AddCommand(setupCmd, checkCmd, daemonCmd)
+	rootCmd.AddCommand(configCmd, daemonCmd)
 
-	if err = rootCmd.Execute(); err != nil {
-		fmt.Println(err)
+	if err := rootCmd.Execute(); err != nil {
+		logging.LogError("ERROR: %s", err)
 		os.Exit(1)
 	}
 }
