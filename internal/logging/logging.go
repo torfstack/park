@@ -35,8 +35,8 @@ func Infof(msg string, args ...any) {
 	logger.Info(fmt.Sprintf(msg, args...))
 }
 
-func Error(msg string, err error) {
-	logger.Error(msg, "error", err)
+func Errorf(msg string, args ...any) {
+	logger.Error(fmt.Sprintf(msg, args...))
 }
 
 func Fatalf(format string, v ...any) {

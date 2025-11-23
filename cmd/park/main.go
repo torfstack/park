@@ -44,6 +44,9 @@ func main() {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Get(false)
+			if err != nil {
+				return fmt.Errorf("main; error while getting config: %w", err)
+			}
 			err = service.RunDaemon(cmd.Context(), cfg)
 			if err != nil {
 				return fmt.Errorf("main; error while running daemon cmd: %w", err)
@@ -70,7 +73,7 @@ func main() {
 	rootCmd.AddCommand(configCmd, daemonCmd, dbCmd)
 
 	if err := rootCmd.Execute(); err != nil {
-		logging.Error("ERROR: %s", err)
+		logging.Fatalf("ERROR: %s", err)
 		os.Exit(1)
 	}
 }

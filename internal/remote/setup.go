@@ -110,7 +110,7 @@ func walkFolder(ctx context.Context, drv *drive.Service, folderID, path string, 
 
 		for _, f := range r.Files {
 			if err = handleFile(ctx, drv, f, folderID, path, syncCtx); err != nil {
-				logging.Infof("error handling file %s: %w", f.Name, err)
+				logging.Errorf("error handling file %s: %s", f.Name, err)
 				continue
 			}
 		}

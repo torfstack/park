@@ -1,7 +1,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -84,10 +83,12 @@ func TestGet(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tempDirSetup(t)
-			tt.want(t)
-		})
+		t.Run(
+			tt.name, func(t *testing.T) {
+				tempDirSetup(t)
+				tt.want(t)
+			},
+		)
 	}
 }
 
@@ -100,7 +101,7 @@ func fileWithTextContent(t *testing.T, text string) *os.File {
 	tempDir := t.TempDir()
 	f, err := os.Create(filepath.Join(tempDir, "file.txt"))
 	require.NoError(t, err)
-	_, err = f.WriteString(fmt.Sprintf("%s", text))
+	_, err = f.WriteString(text)
 	require.NoError(t, err)
 
 	ff, _ := os.Open(f.Name())
