@@ -33,7 +33,7 @@ func (p *ParkTable) Persist() error {
 	defer func(f *os.File) {
 		err = f.Close()
 		if err != nil {
-			logging.Logf("Could not close park table file: %s", err)
+			logging.Infof("Could not close park table file: %s", err)
 		}
 	}(f)
 	for _, file := range p.files {
@@ -65,7 +65,7 @@ func (p *ParkTable) Update(id string, content io.ReadCloser) error {
 	defer func(content io.ReadCloser) {
 		err := content.Close()
 		if err != nil {
-			logging.Logf("could not close content after update: %s", err)
+			logging.Infof("could not close content after update: %s", err)
 		}
 	}(content)
 	if file, ok := p.files[id]; ok {
@@ -83,7 +83,7 @@ func (p *ParkTable) Create(id, name string, content io.ReadCloser) error {
 	defer func(content io.ReadCloser) {
 		err := content.Close()
 		if err != nil {
-			logging.Logf("could not close content after update: %s", err)
+			logging.Infof("could not close content after update: %s", err)
 		}
 	}(content)
 	var f *ParkFile
@@ -160,7 +160,7 @@ func create(content io.ReadCloser, path, id string) (*ParkFile, error) {
 	defer func(f *os.File) {
 		err = f.Close()
 		if err != nil {
-			logging.Logf("Could not close file: %s", err)
+			logging.Infof("Could not close file: %s", err)
 		}
 	}(file)
 	_, err = io.Copy(file, content)
@@ -182,7 +182,7 @@ func (p *ParkFile) update(content io.ReadCloser) error {
 	defer func(f *os.File) {
 		err = f.Close()
 		if err != nil {
-			logging.Logf("Could not close file: %s", err)
+			logging.Infof("Could not close file: %s", err)
 		}
 	}(file)
 	_, err = io.Copy(file, content)

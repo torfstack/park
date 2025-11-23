@@ -1,22 +1,19 @@
-package service
+package remote
 
 import (
-	"bufio"
 	"context"
 	"crypto"
-	"errors"
 	"fmt"
 	"io"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 
+	"github.com/torfstack/park/internal/config"
 	"github.com/torfstack/park/internal/local"
 	"github.com/torfstack/park/internal/logging"
-	"github.com/torfstack/park/internal/util"
 	"google.golang.org/api/drive/v3"
 )
 
@@ -28,93 +25,51 @@ const (
 	NumWorkers = 4
 )
 
-// SetupAndInitialSync initializes the drive directory and does a first synchronization
-func (s *Service) SetupAndInitialSync(ctx context.Context) error {
-	if !s.cfg.IsSetup {
-		logging.Logf("Enter Google Drive directory path (default: %s): ", filepath.Join(util.HomeDir(), "GoogleDrive"))
-		var input string
-		reader := bufio.NewReader(os.Stdin)
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			return fmt.Errorf("could not read input: %w", err)
-		}
-		input = strings.TrimSpace(input)
-		if input == "" {
-			input = filepath.Join(util.HomeDir(), "GoogleDrive")
-		}
-		err = os.MkdirAll(input, 0755)
-		if err != nil {
-			return fmt.Errorf("could not create Google Drive directory '%s': %w", input, err)
-		}
-		entries, err := os.ReadDir(input)
-		if err != nil {
-			return fmt.Errorf("could not read Google Drive directory '%s': %w", input, err)
-		}
-		if len(entries) > 0 {
-			return errors.New("directory is not empty. Please specify an empty directory")
-		}
-		s.cfg.LocalDir = input
-		s.cfg.IsSetup = true
-		if err = s.cfg.PersistConfig(); err != nil {
-			return fmt.Errorf("could not persist config: %w", err)
-		}
-	}
-	if !s.cfg.IsInitialized {
-		err := s.performInitialSync(ctx)
-		if err != nil {
-			return fmt.Errorf("could not perform initial sync: %w", err)
-		}
-		s.cfg.IsInitialized = true
-		if err = s.cfg.PersistConfig(); err != nil {
-			return fmt.Errorf("could not persist config: %w", err)
-		}
-	}
-	return nil
-}
-
 type job struct {
 	file    *drive.File
 	syncCtx *syncContext
 }
 
-func (s *Service) performInitialSync(ctx context.Context) error {
+func performInitialSync(ctx context.Context, drv *drive.Service, cfg config.Config) error {
 	syncCtx := syncContext{
 		fileMap: make(map[string]*drive.File),
 		parents: make(map[string]string),
 	}
 
-	err := s.walkFolder(ctx, RootFolderId, s.cfg.LocalDir, &syncCtx)
+	err := walkFolder(ctx, drv, RootFolderId, cfg.LocalDir, &syncCtx)
 	if err != nil {
 		return fmt.Errorf("error walking root folder: %w", err)
 	}
 
-	err = s.createDirs(&syncCtx)
+	err = createDirs(cfg, &syncCtx)
 	if err != nil {
 		return fmt.Errorf("error creating initial directories: %w", err)
 	}
-	logging.LogDebug("Created initial directories")
+	logging.Debug("Created initial directories")
 
 	jobs := make(chan job)
 	results := make(chan local.ParkFile)
 	var wg sync.WaitGroup
 
-	logging.LogDebug("Starting download workers")
+	logging.Debug("Starting download workers")
 	for i := 0; i < NumWorkers; i++ {
-		wg.Go(func() {
-			for j := range jobs {
-				parkFile, errGo := s.downloadFile(j.file, &syncCtx)
-				if errGo != nil {
-					logging.LogDebugf("Skipping: could not download file '%s': %s", j.file.Name, errGo)
-					continue
+		wg.Go(
+			func() {
+				for j := range jobs {
+					parkFile, errGo := downloadFile(drv, cfg, j.file, &syncCtx)
+					if errGo != nil {
+						logging.Debugf("Skipping: could not download file '%s': %s", j.file.Name, errGo)
+						continue
+					}
+					results <- *parkFile
 				}
-				results <- *parkFile
-			}
-		})
+			},
+		)
 	}
 	go func() {
-		s.enqueueDownloadJobs(jobs, &syncCtx)
+		enqueueDownloadJobs(jobs, &syncCtx)
 		close(jobs)
-		logging.LogDebug("Finished enqueueing download jobs")
+		logging.Debug("Finished enqueueing download jobs")
 	}()
 
 	go func() {
@@ -126,20 +81,20 @@ func (s *Service) performInitialSync(ctx context.Context) error {
 	for parkFile := range results {
 		parkFiles[parkFile.FileId] = parkFile
 	}
-	parkTable := local.NewParkTable(s.cfg, parkFiles)
+	parkTable := local.NewParkTable(cfg, parkFiles)
 	err = parkTable.Persist()
 	if err != nil {
 		return fmt.Errorf("error persisting initial park table: %w", err)
 	}
 
-	logging.LogDebug("Downloads finished!")
+	logging.Debug("Downloads finished!")
 	return nil
 }
 
-func (s *Service) walkFolder(ctx context.Context, folderID, path string, syncCtx *syncContext) error {
+func walkFolder(ctx context.Context, drv *drive.Service, folderID, path string, syncCtx *syncContext) error {
 	pageToken := ""
 	for {
-		req := s.drv.Files.List().
+		req := drv.Files.List().
 			Q(fmt.Sprintf("'%s' in parents and trashed=false", folderID)).
 			Fields("nextPageToken, files(id, name, mimeType, parents, shortcutDetails)").
 			PageSize(1000)
@@ -154,8 +109,8 @@ func (s *Service) walkFolder(ctx context.Context, folderID, path string, syncCtx
 		}
 
 		for _, f := range r.Files {
-			if err = s.handleFile(ctx, f, folderID, path, syncCtx); err != nil {
-				logging.Logf("error handling file %s: %w", f.Name, err)
+			if err = handleFile(ctx, drv, f, folderID, path, syncCtx); err != nil {
+				logging.Infof("error handling file %s: %w", f.Name, err)
 				continue
 			}
 		}
@@ -168,7 +123,13 @@ func (s *Service) walkFolder(ctx context.Context, folderID, path string, syncCtx
 	return nil
 }
 
-func (s *Service) handleFile(ctx context.Context, f *drive.File, folderId, path string, syncCtx *syncContext) error {
+func handleFile(
+	ctx context.Context,
+	drv *drive.Service,
+	f *drive.File,
+	folderId, path string,
+	syncCtx *syncContext,
+) error {
 	if f.DriveId != "" {
 		return nil
 	}
@@ -177,7 +138,7 @@ func (s *Service) handleFile(ctx context.Context, f *drive.File, folderId, path 
 
 	switch f.MimeType {
 	case FolderMimeType:
-		if err := s.walkFolder(ctx, f.Id, fullPath, syncCtx); err != nil {
+		if err := walkFolder(ctx, drv, f.Id, fullPath, syncCtx); err != nil {
 			return fmt.Errorf("error walking folder %s: %w", f.Name, err)
 		}
 		syncCtx.parents[f.Id] = folderId
@@ -193,13 +154,13 @@ func (s *Service) handleFile(ctx context.Context, f *drive.File, folderId, path 
 
 		if targetType == FolderMimeType {
 			// TODO: keep track of visited ids to not get into a shortcut loop
-			if err := s.walkFolder(ctx, targetID, filepath.Join(path, f.Name), syncCtx); err != nil {
+			if err := walkFolder(ctx, drv, targetID, filepath.Join(path, f.Name), syncCtx); err != nil {
 				return fmt.Errorf("error walking shortcut folder %s: %w", f.Name, err)
 			}
 			syncCtx.parents[targetID] = folderId
 			syncCtx.fileMap[targetID] = f
 		} else {
-			shortcutFile, err := s.drv.Files.Get(targetID).Fields("id, name").Do()
+			shortcutFile, err := drv.Files.Get(targetID).Fields("id, name").Do()
 			if err != nil {
 				return fmt.Errorf("error getting shortcut target file %s: %w", f.Name, err)
 			}
@@ -219,11 +180,11 @@ type syncContext struct {
 	parents map[string]string
 }
 
-func (s *Service) createDirs(syncCtx *syncContext) error {
+func createDirs(cfg config.Config, syncCtx *syncContext) error {
 	files := slices.Collect(maps.Values(syncCtx.fileMap))
 	for _, f := range files {
 		if f.MimeType == FolderMimeType {
-			path := filepath.Join(s.cfg.LocalDir, localPath(f, syncCtx))
+			path := filepath.Join(cfg.LocalDir, localPath(f, syncCtx))
 			if err := os.MkdirAll(path, 0755); err != nil {
 				return err
 			}
@@ -246,7 +207,7 @@ func localPath(file *drive.File, syncCtx *syncContext) string {
 	return f
 }
 
-func (s *Service) enqueueDownloadJobs(jobs chan<- job, syncCtx *syncContext) {
+func enqueueDownloadJobs(jobs chan<- job, syncCtx *syncContext) {
 	files := slices.Collect(maps.Values(syncCtx.fileMap))
 	for _, file := range files {
 		if file.MimeType != FolderMimeType {
@@ -255,19 +216,19 @@ func (s *Service) enqueueDownloadJobs(jobs chan<- job, syncCtx *syncContext) {
 	}
 }
 
-func (s *Service) downloadFile(f *drive.File, syncCtx *syncContext) (*local.ParkFile, error) {
-	res, err := s.drv.Files.Get(f.Id).Download()
+func downloadFile(drv *drive.Service, cfg config.Config, f *drive.File, syncCtx *syncContext) (*local.ParkFile, error) {
+	res, err := drv.Files.Get(f.Id).Download()
 	if err != nil {
 		return nil, fmt.Errorf("could not download file '%s': %w", f.Name, err)
 	}
 	defer func(Body io.ReadCloser) {
 		if err = Body.Close(); err != nil {
-			logging.LogDebugf("Could not close body: %s", err)
+			logging.Debugf("Could not close body: %s", err)
 		}
 	}(res.Body)
 
-	absoluteLocalPath := filepath.Join(s.cfg.LocalDir, localPath(f, syncCtx))
-	logging.LogDebugf("Downloading %s to %s", f.Name, absoluteLocalPath)
+	absoluteLocalPath := filepath.Join(cfg.LocalDir, localPath(f, syncCtx))
+	logging.Debugf("Downloading %s to %s", f.Name, absoluteLocalPath)
 
 	out, err := os.Create(absoluteLocalPath)
 	if err != nil {
@@ -289,10 +250,4 @@ func (s *Service) downloadFile(f *drive.File, syncCtx *syncContext) (*local.Park
 		FileId:      f.Id,
 		ContentHash: sha.Sum(nil),
 	}, nil
-}
-
-func (s *Service) isSetupAlready() bool {
-	return s.cfg.IsSetup &&
-		s.cfg.IsInitialized &&
-		s.cfg.LocalDir != ""
 }

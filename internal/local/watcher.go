@@ -58,14 +58,14 @@ func (w *Watcher) addDir(path string) error {
 	if err = w.watcher.Add(path); err != nil {
 		return fmt.Errorf("add-dir; could not add directory to watcher: %w", err)
 	}
-	logging.LogDebugf("Added directory to watcher: %s", path)
+	logging.Debugf("Added directory to watcher: %s", path)
 	return nil
 }
 
 func (w *Watcher) Close() {
 	close(w.Events)
 	if err := w.watcher.Close(); err != nil {
-		logging.Logf("Error closing watcher: %s", err)
+		logging.Infof("Error closing watcher: %s", err)
 	}
 }
 
@@ -93,7 +93,7 @@ func (w *Watcher) Run(_ context.Context) error {
 			if !ok {
 				return fmt.Errorf("watcher error channel closed")
 			}
-			logging.Logf("FSNotify Error: %v", err)
+			logging.Infof("FSNotify Error: %v", err)
 		}
 	}
 }
@@ -110,7 +110,7 @@ func (w *Watcher) handle(event fsnotify.Event) error {
 		// Nothing to do yet, fsnotify stops watching directories when they are removed
 		// A rename is followed by a create event
 	default:
-		logging.LogDebugf("Ignoring event: %s", event)
+		logging.Debugf("Ignoring event: %s", event)
 	}
 	return nil
 }

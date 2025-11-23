@@ -29,11 +29,11 @@ func consumeWatcherEvents(c <-chan fsnotify.Event) {
 	for event := range c {
 		switch {
 		case event.Has(fsnotify.Create):
-			logging.LogDebugf("Received create event: %s", event)
+			logging.Debugf("Received create event: %s", event)
 		case event.Has(fsnotify.Write):
-			logging.LogDebugf("Received write event: %s", event)
+			logging.Debugf("Received write event: %s", event)
 		case event.Has(fsnotify.Remove):
-			logging.LogDebugf("Received remove event: %s", event)
+			logging.Debugf("Received remove event: %s", event)
 		}
 	}
 }

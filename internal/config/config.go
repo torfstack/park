@@ -16,13 +16,14 @@ import (
 )
 
 var (
-	configFilePath  = filepath.Join(util.HomeDir(), ".config", "park", "config.toml")
+	configFilePath  = filepath.Join(util.ParkConfigDir, "config.toml")
 	defaultDriveDir = filepath.Join(util.HomeDir(), "drive")
 	inputFile       = os.Stdin
 )
 
 type Config struct {
-	LocalDir string `toml:"local_dir"`
+	LocalDir          string `toml:"local_dir"`
+	RemoteInitialized bool   `toml:"remote_initialized"`
 }
 
 func Get(interactive bool) (Config, error) {
@@ -66,7 +67,7 @@ func (c *Config) persist() error {
 		return fmt.Errorf("could not open config file for writing '%s': %w", configFilePath, err)
 	}
 
-	logging.LogDebugf("Persisting config file to '%s'", configFilePath)
+	logging.Debugf("Persisting config file to '%s'", configFilePath)
 	err = toml.NewEncoder(f).Encode(c)
 	if err != nil {
 		return fmt.Errorf("could not persist config to file '%s': %w", configFilePath, err)
