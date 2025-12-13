@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/torfstack/park/internal/config"
-	"github.com/torfstack/park/internal/db"
 	"github.com/torfstack/park/internal/logging"
 	"github.com/torfstack/park/internal/service"
 )
@@ -55,22 +54,7 @@ func main() {
 		},
 	}
 
-	dbCmd := &cobra.Command{
-		Use:   "db",
-		Short: "Testing db creation (sqlite)",
-		PreRun: func(cmd *cobra.Command, args []string) {
-			logging.SetDebug(debug)
-		},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			_, err := db.NewDatabase(config.Config{})
-			if err != nil {
-				return fmt.Errorf("main; error while creating db: %w", err)
-			}
-			return nil
-		},
-	}
-
-	rootCmd.AddCommand(configCmd, daemonCmd, dbCmd)
+	rootCmd.AddCommand(configCmd, daemonCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		logging.Fatalf("ERROR: %s", err)
