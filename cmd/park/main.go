@@ -27,7 +27,7 @@ func main() {
 			logging.SetDebug(debug)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_, err := config.Get(true)
+			_, err := config.GetInteractive()
 			if err != nil {
 				return fmt.Errorf("main; error while running setup cmd: %w", err)
 			}
@@ -42,7 +42,7 @@ func main() {
 			logging.SetDebug(debug)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Get(false)
+			cfg, err := config.Get()
 			if err != nil {
 				return fmt.Errorf("main; error while getting config: %w", err)
 			}

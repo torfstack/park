@@ -1,14 +1,12 @@
 package config
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/torfstack/park/internal/logging"
@@ -16,17 +14,25 @@ import (
 )
 
 var (
-	configFilePath  = filepath.Join(util.ParkConfigDir, "config.toml")
-	defaultDriveDir = filepath.Join(util.HomeDir(), "drive")
-	inputFile       = os.Stdin
+	configFilePath      = filepath.Join(util.ParkConfigDir, "config.toml")
+	defaultDriveDir     = filepath.Join(util.HomeDir(), "park-drive")
+	defaultSyncInterval = 60 * time.Second
 )
 
 type Config struct {
-	LocalDir          string `toml:"local_dir"`
-	RemoteInitialized bool   `toml:"remote_initialized"`
+	LocalDir     string        `toml:"local_dir"`
+	SyncInterval time.Duration `toml:"sync_interval"`
 }
 
-func Get(interactive bool) (Config, error) {
+func Get() (Config, error) {
+	return get(false)
+}
+
+func GetInteractive() (Config, error) {
+	return get(true)
+}
+
+func get(interactive bool) (Config, error) {
 	c := Config{}
 	f, err := os.Open(configFilePath)
 	switch {
@@ -44,18 +50,11 @@ func Get(interactive bool) (Config, error) {
 }
 
 func initConfig(interactive bool) (Config, error) {
-	c := Config{LocalDir: defaultDriveDir}
+	c := initialConfig()
 	if interactive {
-		reader := bufio.NewReader(inputFile)
-		fmt.Printf("Enter local directory path for drive to sync to [default: %s]: ", c.LocalDir)
-		input, err := reader.ReadString('\n')
-		if err != nil && !errors.Is(err, io.EOF) {
-			return c, fmt.Errorf("could not read user input: %w", err)
-		}
-
-		input = strings.TrimSpace(input)
-		if input != "" {
-			c.LocalDir = input
+		err := guidedInitialization(&c)
+		if err != nil {
+			return c, fmt.Errorf("could not initialize config interactively: %w", err)
 		}
 	}
 	return c, c.persist()
@@ -74,4 +73,8 @@ func (c *Config) persist() error {
 	}
 
 	return nil
+}
+
+func initialConfig() Config {
+	return Config{SyncInterval: defaultSyncInterval, LocalDir: defaultDriveDir}
 }

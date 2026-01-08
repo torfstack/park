@@ -1,2 +1,2 @@
--- name: GetFiles :many
-SELECT * FROM files
+-- name: GetConfig :one
+SELECT * FROM state

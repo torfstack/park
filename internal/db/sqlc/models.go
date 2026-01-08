@@ -4,8 +4,7 @@
 
 package sqlc
 
-type File struct {
-	ID          int64       `json:"id"`
-	Path        string      `json:"path"`
-	ContentHash interface{} `json:"content_hash"`
+type State struct {
+	Lock             interface{} `json:"lock"`
+	CurrentPageToken string      `json:"current_page_token"`
 }

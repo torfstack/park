@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/torfstack/park/internal/config"
-	"github.com/torfstack/park/internal/logging"
 	"github.com/torfstack/park/internal/util"
 	"google.golang.org/api/drive/v3"
 )
@@ -18,11 +17,6 @@ var (
 )
 
 func Initialize(ctx context.Context, cfg config.Config, drv *drive.Service) error {
-	if cfg.RemoteInitialized {
-		logging.Debug("Remote already initialized!")
-		return nil
-	}
-
 	pageToken, err := initialPageToken(drv)
 	if err != nil {
 		return fmt.Errorf("could not get initial page token: %w", err)

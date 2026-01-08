@@ -1,13 +1,12 @@
 -- +goose Up
 -- +goose StatementBegin
-CREATE TABLE files (
-   id INTEGER PRIMARY KEY,
-   path text NOT NULL,
-   content_hash bytea NOT NULL
+CREATE TABLE state (
+    lock char(1) NOT NULL DEFAULT('X') PRIMARY KEY CHECK (lock IN ('X')),
+    current_page_token text NOT NULL
 );
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
-DROP TABLE files;
+DROP TABLE state;
 -- +goose StatementEnd

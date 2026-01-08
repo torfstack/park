@@ -24,7 +24,7 @@ func TestGet(t *testing.T) {
 		{
 			name: "non-interactive; creates config file",
 			want: func(t *testing.T) {
-				_, err := Get(false)
+				_, err := Get()
 				require.NoError(t, err)
 
 				_, err = os.Stat(configFilePath)
@@ -34,7 +34,7 @@ func TestGet(t *testing.T) {
 		{
 			name: "non-interactive; config does not exist",
 			want: func(t *testing.T) {
-				cfg, err := Get(false)
+				cfg, err := Get()
 				require.NoError(t, err)
 				require.Equal(t, defaultDriveDir, cfg.LocalDir)
 			},
@@ -45,7 +45,7 @@ func TestGet(t *testing.T) {
 				path := t.TempDir()
 				require.NoError(t, (&Config{LocalDir: path}).persist())
 
-				cfg, err := Get(false)
+				cfg, err := Get()
 				require.NoError(t, err)
 				require.Equal(t, path, cfg.LocalDir)
 			},
@@ -54,7 +54,7 @@ func TestGet(t *testing.T) {
 			name: "interactive; creates config file",
 			want: func(t *testing.T) {
 				inputFile = fileWithTextContent(t, "some/path")
-				_, err := Get(false)
+				_, err := Get()
 				require.NoError(t, err)
 
 				_, err = os.Stat(configFilePath)
@@ -65,7 +65,7 @@ func TestGet(t *testing.T) {
 			name: "interactive; config does not exist",
 			want: func(t *testing.T) {
 				inputFile = fileWithTextContent(t, "some/path")
-				cfg, err := Get(true)
+				cfg, err := GetInteractive()
 				require.NoError(t, err)
 				require.Equal(t, "some/path", cfg.LocalDir)
 			},
@@ -76,7 +76,7 @@ func TestGet(t *testing.T) {
 				path := t.TempDir()
 				require.NoError(t, (&Config{LocalDir: path}).persist())
 
-				cfg, err := Get(true)
+				cfg, err := GetInteractive()
 				require.NoError(t, err)
 				require.Equal(t, path, cfg.LocalDir)
 			},

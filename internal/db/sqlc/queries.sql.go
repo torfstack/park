@@ -9,29 +9,13 @@ import (
 	"context"
 )
 
-const getFiles = `-- name: GetFiles :many
-SELECT id, path, content_hash FROM files
+const getConfig = `-- name: GetConfig :one
+SELECT lock, current_page_token FROM state
 `
 
-func (q *Queries) GetFiles(ctx context.Context) ([]File, error) {
-	rows, err := q.db.QueryContext(ctx, getFiles)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []File
-	for rows.Next() {
-		var i File
-		if err := rows.Scan(&i.ID, &i.Path, &i.ContentHash); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+func (q *Queries) GetConfig(ctx context.Context) (State, error) {
+	row := q.db.QueryRowContext(ctx, getConfig)
+	var i State
+	err := row.Scan(&i.Lock, &i.CurrentPageToken)
+	return i, err
 }
