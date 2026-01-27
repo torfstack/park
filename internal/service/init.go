@@ -1,22 +1,16 @@
-package remote
+package service
 
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/torfstack/park/internal/config"
-	"github.com/torfstack/park/internal/util"
+	"github.com/torfstack/park/internal/db"
+	"github.com/torfstack/park/internal/db/sqlc"
 	"google.golang.org/api/drive/v3"
 )
 
-var (
-	pageTokenFile = filepath.Join(util.ParkConfigDir, "page_token")
-)
-
-func Initialize(ctx context.Context, cfg config.Config, drv *drive.Service) error {
+func InitialSync(ctx context.Context, cfg config.Config, drv *drive.Service) error {
 	pageToken, err := initialPageToken(drv)
 	if err != nil {
 		return fmt.Errorf("could not get initial page token: %w", err)
@@ -27,7 +21,7 @@ func Initialize(ctx context.Context, cfg config.Config, drv *drive.Service) erro
 		return fmt.Errorf("could not perform initial sync: %w", err)
 	}
 
-	err = persistPageToken(pageToken)
+	err = persistPageToken(ctx, pageToken)
 	if err != nil {
 		return fmt.Errorf("could not persist page token: %w", err)
 	}
@@ -46,21 +40,18 @@ func initialPageToken(drv *drive.Service) (string, error) {
 	return initialToken.StartPageToken, nil
 }
 
-func getPageToken() (string, error) {
-	pageToken, err := os.ReadFile(pageTokenFile)
+func persistPageToken(ctx context.Context, pageToken string) error {
+	d, err := db.New(ctx)
 	if err != nil {
-		return "", fmt.Errorf("could not read page token from file %s: %w", pageTokenFile, err)
+		return fmt.Errorf("could not create database: %w", err)
 	}
-	if len(pageToken) == 0 {
-		return "", fmt.Errorf("empty page token")
-	}
-	return strings.TrimSuffix(string(pageToken), "\n"), nil
-}
-
-func persistPageToken(pageToken string) error {
-	err := util.WriteFile(pageTokenFile, []byte(pageToken))
+	defer d.Close()
+	err = d.Queries().UpsertPageToken(ctx, sqlc.UpsertPageTokenParams{
+		ID:               1,
+		CurrentPageToken: pageToken,
+	})
 	if err != nil {
-		return fmt.Errorf("could not write page token to file %s: %w", pageTokenFile, err)
+		return fmt.Errorf("could not run upsert page token query: %w", err)
 	}
 	return nil
 }

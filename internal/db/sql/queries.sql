@@ -3,6 +3,11 @@ SELECT id, current_page_token
 FROM state
 WHERE id = 1;
 
+-- name: UpsertPageToken :exec
+INSERT INTO state (id, current_page_token)
+VALUES (?, ?)
+ON CONFLICT (id) DO UPDATE SET current_page_token = EXCLUDED.current_page_token;
+
 -- name: GetConfig :one
 SELECT id, root_dir, sync_interval
 FROM config

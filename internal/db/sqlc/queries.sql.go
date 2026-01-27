@@ -123,3 +123,19 @@ func (q *Queries) UpsertFile(ctx context.Context, arg UpsertFileParams) error {
 	_, err := q.db.ExecContext(ctx, upsertFile, arg.Path, arg.ContentHash, arg.LastModified)
 	return err
 }
+
+const upsertPageToken = `-- name: UpsertPageToken :exec
+INSERT INTO state (id, current_page_token)
+VALUES (?, ?)
+ON CONFLICT (id) DO UPDATE SET current_page_token = EXCLUDED.current_page_token
+`
+
+type UpsertPageTokenParams struct {
+	ID               int64  `json:"id"`
+	CurrentPageToken string `json:"current_page_token"`
+}
+
+func (q *Queries) UpsertPageToken(ctx context.Context, arg UpsertPageTokenParams) error {
+	_, err := q.db.ExecContext(ctx, upsertPageToken, arg.ID, arg.CurrentPageToken)
+	return err
+}

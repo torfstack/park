@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/torfstack/park/internal/auth"
 	"github.com/torfstack/park/internal/config"
 	"github.com/torfstack/park/internal/logging"
 	"github.com/torfstack/park/internal/service"
@@ -56,11 +57,22 @@ func main() {
 
 	initCmd := &cobra.Command{
 		Use:   "init",
-		Short: "Initialize config",
+		Short: "InitialSync config",
+		PreRun: func(cmd *cobra.Command, args []string) {
+			logging.SetDebug(debug)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_, err := config.GetInteractive(cmd.Context())
+			cfg, err := config.GetInteractive(cmd.Context())
 			if err != nil {
 				return fmt.Errorf("main; error while running init cmd: %w", err)
+			}
+			drv, err := auth.DriveService(cmd.Context())
+			if err != nil {
+				return fmt.Errorf("main; error while getting drive service: %w", err)
+			}
+			err = service.InitialSync(cmd.Context(), cfg, drv)
+			if err != nil {
+				return fmt.Errorf("main; error during initial sync: %w", err)
 			}
 			return nil
 		},
