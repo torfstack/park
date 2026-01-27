@@ -27,7 +27,7 @@ func main() {
 			logging.SetDebug(debug)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_, err := config.GetInteractive()
+			_, err := config.GetInteractive(cmd.Context())
 			if err != nil {
 				return fmt.Errorf("main; error while running setup cmd: %w", err)
 			}
@@ -42,7 +42,7 @@ func main() {
 			logging.SetDebug(debug)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Get()
+			cfg, err := config.Get(cmd.Context())
 			if err != nil {
 				return fmt.Errorf("main; error while getting config: %w", err)
 			}
@@ -54,7 +54,19 @@ func main() {
 		},
 	}
 
-	rootCmd.AddCommand(configCmd, daemonCmd)
+	initCmd := &cobra.Command{
+		Use:   "init",
+		Short: "Initialize config",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := config.GetInteractive(cmd.Context())
+			if err != nil {
+				return fmt.Errorf("main; error while running init cmd: %w", err)
+			}
+			return nil
+		},
+	}
+
+	rootCmd.AddCommand(configCmd, daemonCmd, initCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		logging.Fatalf("ERROR: %s", err)

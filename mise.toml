@@ -25,3 +25,8 @@ alias = "f"
 [tasks.dep-update]
 description = "Update all dependencies to most recent version (caution!)"
 run = "go get -u ./... && go mod tidy"
+
+[tasks.gen]
+description = "Run all go code generation"
+run = "go generate ./..."
+alias = "g"
