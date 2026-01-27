@@ -65,3 +65,22 @@ func (d *Database) Close() error {
 func (d *Database) Queries() *sqlc.Queries {
 	return sqlc.New(d.db)
 }
+
+func (d *Database) WithTransaction(ctx context.Context, fn func(*sqlc.Queries) error) error {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	q := sqlc.New(tx)
+	err = fn(q)
+
+	if err != nil {
+		if rbErr := tx.Rollback(); rbErr != nil {
+			return fmt.Errorf("tx err: %v, rb err: %v", err, rbErr)
+		}
+		return err
+	}
+
+	return tx.Commit()
+}

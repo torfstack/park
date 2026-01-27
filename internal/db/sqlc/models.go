@@ -12,7 +12,8 @@ type Config struct {
 
 type File struct {
 	Path         string `json:"path"`
-	ContentHash  string `json:"content_hash"`
+	DriveID      string `json:"drive_id"`
+	ContentHash  []byte `json:"content_hash"`
 	LastModified int64  `json:"last_modified"`
 }
 

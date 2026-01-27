@@ -16,7 +16,8 @@ CREATE TABLE config
 CREATE TABLE files
 (
     path          text PRIMARY KEY,
-    content_hash  text NOT NULL,
+    drive_id      text NOT NULL,
+    content_hash  blob NOT NULL,
     last_modified int  NOT NULL
 );
 

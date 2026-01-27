@@ -21,7 +21,7 @@ func (q *Queries) DeleteFile(ctx context.Context, path string) error {
 }
 
 const getAllFiles = `-- name: GetAllFiles :many
-SELECT path, content_hash, last_modified
+SELECT path, drive_id, content_hash, last_modified
 FROM files
 ORDER BY path
 `
@@ -35,7 +35,12 @@ func (q *Queries) GetAllFiles(ctx context.Context) ([]File, error) {
 	var items []File
 	for rows.Next() {
 		var i File
-		if err := rows.Scan(&i.Path, &i.ContentHash, &i.LastModified); err != nil {
+		if err := rows.Scan(
+			&i.Path,
+			&i.DriveID,
+			&i.ContentHash,
+			&i.LastModified,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -63,7 +68,7 @@ func (q *Queries) GetConfig(ctx context.Context) (Config, error) {
 }
 
 const getFile = `-- name: GetFile :one
-SELECT path, content_hash, last_modified
+SELECT path, drive_id, content_hash, last_modified
 FROM files
 WHERE path = ?
 `
@@ -71,7 +76,12 @@ WHERE path = ?
 func (q *Queries) GetFile(ctx context.Context, path string) (File, error) {
 	row := q.db.QueryRowContext(ctx, getFile, path)
 	var i File
-	err := row.Scan(&i.Path, &i.ContentHash, &i.LastModified)
+	err := row.Scan(
+		&i.Path,
+		&i.DriveID,
+		&i.ContentHash,
+		&i.LastModified,
+	)
 	return i, err
 }
 
@@ -106,8 +116,8 @@ func (q *Queries) UpsertConfig(ctx context.Context, arg UpsertConfigParams) erro
 }
 
 const upsertFile = `-- name: UpsertFile :exec
-INSERT INTO files (path, content_hash, last_modified)
-VALUES (?, ?, ?)
+INSERT INTO files (path, drive_id, content_hash, last_modified)
+VALUES (?, ?, ?, ?)
 ON CONFLICT (path)
     DO UPDATE SET content_hash  = EXCLUDED.content_hash,
                   last_modified = EXCLUDED.last_modified
@@ -115,12 +125,18 @@ ON CONFLICT (path)
 
 type UpsertFileParams struct {
 	Path         string `json:"path"`
-	ContentHash  string `json:"content_hash"`
+	DriveID      string `json:"drive_id"`
+	ContentHash  []byte `json:"content_hash"`
 	LastModified int64  `json:"last_modified"`
 }
 
 func (q *Queries) UpsertFile(ctx context.Context, arg UpsertFileParams) error {
-	_, err := q.db.ExecContext(ctx, upsertFile, arg.Path, arg.ContentHash, arg.LastModified)
+	_, err := q.db.ExecContext(ctx, upsertFile,
+		arg.Path,
+		arg.DriveID,
+		arg.ContentHash,
+		arg.LastModified,
+	)
 	return err
 }
 

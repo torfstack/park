@@ -20,19 +20,19 @@ ON CONFLICT (id) DO UPDATE SET root_dir      = EXCLUDED.root_dir,
                                sync_interval = EXCLUDED.sync_interval;
 
 -- name: UpsertFile :exec
-INSERT INTO files (path, content_hash, last_modified)
-VALUES (?, ?, ?)
+INSERT INTO files (path, drive_id, content_hash, last_modified)
+VALUES (?, ?, ?, ?)
 ON CONFLICT (path)
     DO UPDATE SET content_hash  = EXCLUDED.content_hash,
                   last_modified = EXCLUDED.last_modified;
 
 -- name: GetFile :one
-SELECT path, content_hash, last_modified
+SELECT path, drive_id, content_hash, last_modified
 FROM files
 WHERE path = ?;
 
 -- name: GetAllFiles :many
-SELECT path, content_hash, last_modified
+SELECT path, drive_id, content_hash, last_modified
 FROM files
 ORDER BY path;
 

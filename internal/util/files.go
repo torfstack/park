@@ -28,3 +28,12 @@ func WriteFile(path string, data []byte) error {
 	}
 	return os.WriteFile(path, data, 0644)
 }
+
+// CreateTempDir creates a temporary directory with a prefix of "park-"
+func CreateTempDir() (string, error) {
+	dir, err := os.MkdirTemp("", "park-")
+	if err != nil {
+		return "", err
+	}
+	return dir, nil
+}

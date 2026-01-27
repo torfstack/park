@@ -10,8 +10,9 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"time"
 
-	"github.com/torfstack/park/internal/config"
+	"github.com/torfstack/park/internal/db/sqlc"
 	"github.com/torfstack/park/internal/local"
 	"github.com/torfstack/park/internal/logging"
 	"google.golang.org/api/drive/v3"
@@ -30,18 +31,18 @@ type job struct {
 	syncCtx *syncContext
 }
 
-func performInitialSync(ctx context.Context, drv *drive.Service, cfg config.Config) error {
+func performInitialSync(ctx context.Context, q *sqlc.Queries, drv *drive.Service, intoDir string) error {
 	syncCtx := syncContext{
 		fileMap: make(map[string]*drive.File),
 		parents: make(map[string]string),
 	}
 
-	err := walkFolder(ctx, drv, RootFolderId, cfg.LocalDir, &syncCtx)
+	err := walkFolder(ctx, drv, RootFolderId, intoDir, &syncCtx)
 	if err != nil {
 		return fmt.Errorf("error walking root folder: %w", err)
 	}
 
-	err = createDirs(cfg, &syncCtx)
+	err = createDirs(intoDir, &syncCtx)
 	if err != nil {
 		return fmt.Errorf("error creating initial directories: %w", err)
 	}
@@ -56,7 +57,7 @@ func performInitialSync(ctx context.Context, drv *drive.Service, cfg config.Conf
 		wg.Go(
 			func() {
 				for j := range jobs {
-					parkFile, errGo := downloadFile(drv, cfg, j.file, &syncCtx)
+					parkFile, errGo := downloadFile(drv, intoDir, j.file, &syncCtx)
 					if errGo != nil {
 						logging.Debugf("Skipping: could not download file '%s': %s", j.file.Name, errGo)
 						continue
@@ -77,14 +78,16 @@ func performInitialSync(ctx context.Context, drv *drive.Service, cfg config.Conf
 		close(results)
 	}()
 
-	parkFiles := make(map[string]local.ParkFile)
 	for parkFile := range results {
-		parkFiles[parkFile.FileId] = parkFile
-	}
-	parkTable := local.NewParkTable(cfg, parkFiles)
-	err = parkTable.Persist()
-	if err != nil {
-		return fmt.Errorf("error persisting initial park table: %w", err)
+		err = q.UpsertFile(ctx, sqlc.UpsertFileParams{
+			Path:         parkFile.Path,
+			DriveID:      parkFile.FileId,
+			ContentHash:  parkFile.ContentHash,
+			LastModified: time.Now().Unix(),
+		})
+		if err != nil {
+			return fmt.Errorf("could not persist file: %w", err)
+		}
 	}
 
 	logging.Debug("Downloads finished!")
@@ -180,11 +183,11 @@ type syncContext struct {
 	parents map[string]string
 }
 
-func createDirs(cfg config.Config, syncCtx *syncContext) error {
+func createDirs(intoDir string, syncCtx *syncContext) error {
 	files := slices.Collect(maps.Values(syncCtx.fileMap))
 	for _, f := range files {
 		if f.MimeType == FolderMimeType {
-			path := filepath.Join(cfg.LocalDir, localPath(f, syncCtx))
+			path := filepath.Join(intoDir, localPath(f, syncCtx))
 			if err := os.MkdirAll(path, 0755); err != nil {
 				return err
 			}
@@ -216,7 +219,7 @@ func enqueueDownloadJobs(jobs chan<- job, syncCtx *syncContext) {
 	}
 }
 
-func downloadFile(drv *drive.Service, cfg config.Config, f *drive.File, syncCtx *syncContext) (*local.ParkFile, error) {
+func downloadFile(drv *drive.Service, rootDir string, f *drive.File, syncCtx *syncContext) (*local.ParkFile, error) {
 	res, err := drv.Files.Get(f.Id).Download()
 	if err != nil {
 		return nil, fmt.Errorf("could not download file '%s': %w", f.Name, err)
@@ -227,7 +230,8 @@ func downloadFile(drv *drive.Service, cfg config.Config, f *drive.File, syncCtx 
 		}
 	}(res.Body)
 
-	absoluteLocalPath := filepath.Join(cfg.LocalDir, localPath(f, syncCtx))
+	relativePath := localPath(f, syncCtx)
+	absoluteLocalPath := filepath.Join(rootDir, relativePath)
 	logging.Debugf("Downloading %s to %s", f.Name, absoluteLocalPath)
 
 	out, err := os.Create(absoluteLocalPath)
@@ -246,7 +250,7 @@ func downloadFile(drv *drive.Service, cfg config.Config, f *drive.File, syncCtx 
 	}
 
 	return &local.ParkFile{
-		Path:        absoluteLocalPath,
+		Path:        relativePath,
 		FileId:      f.Id,
 		ContentHash: sha.Sum(nil),
 	}, nil

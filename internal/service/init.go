@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/torfstack/park/internal/config"
 	"github.com/torfstack/park/internal/db"
 	"github.com/torfstack/park/internal/db/sqlc"
+	"github.com/torfstack/park/internal/util"
 	"google.golang.org/api/drive/v3"
 )
 
@@ -16,14 +18,37 @@ func InitialSync(ctx context.Context, cfg config.Config, drv *drive.Service) err
 		return fmt.Errorf("could not get initial page token: %w", err)
 	}
 
-	err = performInitialSync(ctx, drv, cfg)
+	tempDir, err := util.CreateTempDir()
 	if err != nil {
-		return fmt.Errorf("could not perform initial sync: %w", err)
+		return fmt.Errorf("could not create temp dir: %w", err)
 	}
+	defer os.Remove(tempDir)
 
-	err = persistPageToken(ctx, pageToken)
+	d, err := db.New(ctx)
 	if err != nil {
-		return fmt.Errorf("could not persist page token: %w", err)
+		return fmt.Errorf("could not create database: %w", err)
+	}
+	defer d.Close()
+
+	err = d.WithTransaction(ctx, func(q *sqlc.Queries) error {
+		err = performInitialSync(ctx, q, drv, tempDir)
+		if err != nil {
+			return fmt.Errorf("could not perform initial sync: %w", err)
+		}
+
+		err = os.Rename(tempDir, cfg.LocalDir)
+		if err != nil {
+			return fmt.Errorf("could not rename temp dir: %w", err)
+		}
+
+		err = persistPageToken(ctx, q, pageToken)
+		if err != nil {
+			return fmt.Errorf("could not persist page token: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("transaction failed: %w", err)
 	}
 
 	return nil
@@ -40,13 +65,8 @@ func initialPageToken(drv *drive.Service) (string, error) {
 	return initialToken.StartPageToken, nil
 }
 
-func persistPageToken(ctx context.Context, pageToken string) error {
-	d, err := db.New(ctx)
-	if err != nil {
-		return fmt.Errorf("could not create database: %w", err)
-	}
-	defer d.Close()
-	err = d.Queries().UpsertPageToken(ctx, sqlc.UpsertPageTokenParams{
+func persistPageToken(ctx context.Context, q *sqlc.Queries, pageToken string) error {
+	err := q.UpsertPageToken(ctx, sqlc.UpsertPageTokenParams{
 		ID:               1,
 		CurrentPageToken: pageToken,
 	})
