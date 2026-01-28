@@ -1,12 +1,32 @@
--- name: GetState :one
-SELECT id, current_page_token
+-- name: GetPageToken :one
+SELECT page_token
 FROM state
 WHERE id = 1;
 
--- name: UpsertPageToken :exec
-INSERT INTO state (id, current_page_token)
-VALUES (?, ?)
-ON CONFLICT (id) DO UPDATE SET current_page_token = EXCLUDED.current_page_token;
+-- name: GetAuthToken :one
+SELECT auth_token
+FROM state
+WHERE id = 1;
+
+-- name: IsInitialized :one
+SELECT is_initialized
+FROM state
+WHERE id = 1;
+
+-- name: UpdatePageToken :exec
+UPDATE state
+SET page_token = ?
+WHERE id = 1;
+
+-- name: UpdateAuthToken :exec
+UPDATE state
+SET auth_token = ?
+WHERE id = 1;
+
+-- name: SetInitialized :exec
+UPDATE state
+SET is_initialized = true;
+
 
 -- name: GetConfig :one
 SELECT id, root_dir, sync_interval

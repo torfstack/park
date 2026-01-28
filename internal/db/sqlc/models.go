@@ -18,6 +18,8 @@ type File struct {
 }
 
 type State struct {
-	ID               int64  `json:"id"`
-	CurrentPageToken string `json:"current_page_token"`
+	ID            int64  `json:"id"`
+	PageToken     string `json:"page_token"`
+	AuthToken     string `json:"auth_token"`
+	IsInitialized bool   `json:"is_initialized"`
 }

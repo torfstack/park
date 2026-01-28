@@ -2,8 +2,10 @@
 -- +goose StatementBegin
 CREATE TABLE state
 (
-    id                 int PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-    current_page_token text NOT NULL
+    id             int PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    auth_token     text NOT NULL,
+    page_token     text NOT NULL,
+    is_initialized bool NOT NULL
 );
 
 CREATE TABLE config
@@ -21,8 +23,8 @@ CREATE TABLE files
     last_modified int  NOT NULL
 );
 
-INSERT INTO state (id, current_page_token)
-VALUES (1, '');
+INSERT INTO state (id, auth_token, page_token, is_initialized)
+VALUES (1, '', '', false);
 
 INSERT INTO config (id, root_dir, sync_interval)
 VALUES (1, '', 3600);

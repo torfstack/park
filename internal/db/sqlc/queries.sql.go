@@ -54,6 +54,19 @@ func (q *Queries) GetAllFiles(ctx context.Context) ([]File, error) {
 	return items, nil
 }
 
+const getAuthToken = `-- name: GetAuthToken :one
+SELECT auth_token
+FROM state
+WHERE id = 1
+`
+
+func (q *Queries) GetAuthToken(ctx context.Context) (string, error) {
+	row := q.db.QueryRowContext(ctx, getAuthToken)
+	var auth_token string
+	err := row.Scan(&auth_token)
+	return auth_token, err
+}
+
 const getConfig = `-- name: GetConfig :one
 SELECT id, root_dir, sync_interval
 FROM config
@@ -85,17 +98,62 @@ func (q *Queries) GetFile(ctx context.Context, path string) (File, error) {
 	return i, err
 }
 
-const getState = `-- name: GetState :one
-SELECT id, current_page_token
+const getPageToken = `-- name: GetPageToken :one
+SELECT page_token
 FROM state
 WHERE id = 1
 `
 
-func (q *Queries) GetState(ctx context.Context) (State, error) {
-	row := q.db.QueryRowContext(ctx, getState)
-	var i State
-	err := row.Scan(&i.ID, &i.CurrentPageToken)
-	return i, err
+func (q *Queries) GetPageToken(ctx context.Context) (string, error) {
+	row := q.db.QueryRowContext(ctx, getPageToken)
+	var page_token string
+	err := row.Scan(&page_token)
+	return page_token, err
+}
+
+const isInitialized = `-- name: IsInitialized :one
+SELECT is_initialized
+FROM state
+WHERE id = 1
+`
+
+func (q *Queries) IsInitialized(ctx context.Context) (bool, error) {
+	row := q.db.QueryRowContext(ctx, isInitialized)
+	var is_initialized bool
+	err := row.Scan(&is_initialized)
+	return is_initialized, err
+}
+
+const setInitialized = `-- name: SetInitialized :exec
+UPDATE state
+SET is_initialized = true
+`
+
+func (q *Queries) SetInitialized(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, setInitialized)
+	return err
+}
+
+const updateAuthToken = `-- name: UpdateAuthToken :exec
+UPDATE state
+SET auth_token = ?
+WHERE id = 1
+`
+
+func (q *Queries) UpdateAuthToken(ctx context.Context, authToken string) error {
+	_, err := q.db.ExecContext(ctx, updateAuthToken, authToken)
+	return err
+}
+
+const updatePageToken = `-- name: UpdatePageToken :exec
+UPDATE state
+SET page_token = ?
+WHERE id = 1
+`
+
+func (q *Queries) UpdatePageToken(ctx context.Context, pageToken string) error {
+	_, err := q.db.ExecContext(ctx, updatePageToken, pageToken)
+	return err
 }
 
 const upsertConfig = `-- name: UpsertConfig :exec
@@ -137,21 +195,5 @@ func (q *Queries) UpsertFile(ctx context.Context, arg UpsertFileParams) error {
 		arg.ContentHash,
 		arg.LastModified,
 	)
-	return err
-}
-
-const upsertPageToken = `-- name: UpsertPageToken :exec
-INSERT INTO state (id, current_page_token)
-VALUES (?, ?)
-ON CONFLICT (id) DO UPDATE SET current_page_token = EXCLUDED.current_page_token
-`
-
-type UpsertPageTokenParams struct {
-	ID               int64  `json:"id"`
-	CurrentPageToken string `json:"current_page_token"`
-}
-
-func (q *Queries) UpsertPageToken(ctx context.Context, arg UpsertPageTokenParams) error {
-	_, err := q.db.ExecContext(ctx, upsertPageToken, arg.ID, arg.CurrentPageToken)
 	return err
 }

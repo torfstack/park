@@ -2,13 +2,11 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
-	"os"
 	"os/exec"
 	"runtime"
 	"time"
@@ -16,43 +14,6 @@ import (
 	"github.com/torfstack/park/internal/logging"
 	"golang.org/x/oauth2"
 )
-
-func tokenFromFile(file string) (*oauth2.Token, error) {
-	f, err := os.Open(file)
-	if err != nil {
-		return nil, fmt.Errorf("could not open token file: %w", err)
-	}
-	defer func(f *os.File) {
-		err = f.Close()
-		if err != nil {
-			logging.Infof("Could not close token file: %s", err)
-		}
-	}(f)
-	var tok oauth2.Token
-	err = json.NewDecoder(f).Decode(&tok)
-	if err != nil {
-		return nil, fmt.Errorf("could not decode token file: %w", err)
-	}
-	return &tok, nil
-}
-
-func saveToken(path string, token *oauth2.Token) error {
-	fmt.Printf("Saving token to: %s\n", path)
-	f, err := os.Create(path)
-	if err != nil {
-		panic(err)
-	}
-	defer func(f *os.File) {
-		err = f.Close()
-		if err != nil {
-			logging.Infof("Could not close token file after writing: %s", err)
-		}
-	}(f)
-	if err = json.NewEncoder(f).Encode(token); err != nil {
-		return fmt.Errorf("could not encode token and write to disk: %w", err)
-	}
-	return nil
-}
 
 func getTokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token, error) {
 	codeCh, port, err := startOAuthCallbackServer(ctx)

@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/torfstack/park/internal/db/sqlc"
-	"github.com/torfstack/park/internal/local"
 	"github.com/torfstack/park/internal/logging"
 	"google.golang.org/api/drive/v3"
 )
@@ -29,6 +28,12 @@ const (
 type job struct {
 	file    *drive.File
 	syncCtx *syncContext
+}
+
+type parkFile struct {
+	Path        string
+	FileId      string
+	ContentHash []byte
 }
 
 func performInitialSync(ctx context.Context, q *sqlc.Queries, drv *drive.Service, intoDir string) error {
@@ -49,7 +54,7 @@ func performInitialSync(ctx context.Context, q *sqlc.Queries, drv *drive.Service
 	logging.Debug("Created initial directories")
 
 	jobs := make(chan job)
-	results := make(chan local.ParkFile)
+	results := make(chan parkFile)
 	var wg sync.WaitGroup
 
 	logging.Debug("Starting download workers")
@@ -219,7 +224,7 @@ func enqueueDownloadJobs(jobs chan<- job, syncCtx *syncContext) {
 	}
 }
 
-func downloadFile(drv *drive.Service, rootDir string, f *drive.File, syncCtx *syncContext) (*local.ParkFile, error) {
+func downloadFile(drv *drive.Service, rootDir string, f *drive.File, syncCtx *syncContext) (*parkFile, error) {
 	res, err := drv.Files.Get(f.Id).Download()
 	if err != nil {
 		return nil, fmt.Errorf("could not download file '%s': %w", f.Name, err)
@@ -249,7 +254,7 @@ func downloadFile(drv *drive.Service, rootDir string, f *drive.File, syncCtx *sy
 		return nil, fmt.Errorf("could not close file '%s': %w", absoluteLocalPath, err)
 	}
 
-	return &local.ParkFile{
+	return &parkFile{
 		Path:        relativePath,
 		FileId:      f.Id,
 		ContentHash: sha.Sum(nil),

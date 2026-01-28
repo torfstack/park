@@ -1,7 +1,9 @@
 CREATE TABLE state
 (
-    id                 int PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-    current_page_token text NOT NULL
+    id             int PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    page_token     text NOT NULL,
+    auth_token     text NOT NULL,
+    is_initialized bool NOT NULL
 );
 
 CREATE TABLE config
