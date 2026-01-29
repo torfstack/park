@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/torfstack/park/internal/auth"
 	"github.com/torfstack/park/internal/config"
+	"github.com/torfstack/park/internal/db"
 	"github.com/torfstack/park/internal/logging"
 	"github.com/torfstack/park/internal/service"
 )
@@ -21,21 +22,6 @@ func main() {
 	rootCmd.PersistentFlags().
 		BoolVarP(&debug, "debug", "d", false, "Enable debug output")
 
-	configCmd := &cobra.Command{
-		Use:   "config",
-		Short: "Setup config",
-		PreRun: func(cmd *cobra.Command, args []string) {
-			logging.SetDebug(debug)
-		},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			_, err := config.GetInteractive(cmd.Context())
-			if err != nil {
-				return fmt.Errorf("main; error while running setup cmd: %w", err)
-			}
-			return nil
-		},
-	}
-
 	daemonCmd := &cobra.Command{
 		Use:   "daemon",
 		Short: "Run in daemon mode (watch for changes and sync)",
@@ -43,6 +29,17 @@ func main() {
 			logging.SetDebug(debug)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			d, err := db.New(cmd.Context())
+			if err != nil {
+				return fmt.Errorf("could not create database: %w", err)
+			}
+			isInitialized, err := d.Queries().IsInitialized(cmd.Context())
+			if err != nil {
+				return fmt.Errorf("could not check if state is initialized: %w", err)
+			}
+			if !isInitialized {
+				return fmt.Errorf("run `park init` first")
+			}
 			cfg, err := config.Get(cmd.Context())
 			if err != nil {
 				return fmt.Errorf("main; error while getting config: %w", err)
@@ -78,7 +75,7 @@ func main() {
 		},
 	}
 
-	rootCmd.AddCommand(configCmd, daemonCmd, initCmd)
+	rootCmd.AddCommand(daemonCmd, initCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		logging.Fatalf("ERROR: %s", err)

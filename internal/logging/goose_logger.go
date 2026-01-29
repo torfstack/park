@@ -12,5 +12,5 @@ func (p ParkLoggerGoose) Fatalf(format string, v ...interface{}) {
 }
 
 func (p ParkLoggerGoose) Printf(format string, v ...interface{}) {
-	Infof(format, v...)
+	Debugf(format, v...)
 }
