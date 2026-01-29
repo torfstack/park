@@ -1,0 +1,32 @@
+[tools]
+golangci-lint = "2.7.2"
+go = "latest"
+
+[tasks.install]
+description = "Install park cli"
+run = "go install ./cmd/park/"
+alias = "i"
+
+[tasks.test]
+description = "Run park cli tests"
+run = "go test ./..."
+alias = "t"
+
+[tasks.lint]
+description = "Run linter"
+run = "golangci-lint run ./..."
+alias = "l"
+
+[tasks.fmt]
+description = "Run code formatter"
+run = "golangci-lint fmt ./..."
+alias = "f"
+
+[tasks.dep-update]
+description = "Update all dependencies to most recent version (caution!)"
+run = "go get -u ./... && go mod tidy"
+
+[tasks.gen]
+description = "Run all go code generation"
+run = "go generate ./..."
+alias = "g"

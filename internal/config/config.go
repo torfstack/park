@@ -1,63 +1,91 @@
 package config
 
 import (
-	"errors"
+	"context"
 	"fmt"
-	"io/fs"
-	"os"
 	"path/filepath"
+	"time"
 
-	"github.com/BurntSushi/toml"
-	"github.com/torfstack/park/internal/logging"
+	"github.com/torfstack/park/internal/db"
+	"github.com/torfstack/park/internal/db/sqlc"
 	"github.com/torfstack/park/internal/util"
 )
 
+var (
+	defaultDriveDir     = filepath.Join(util.HomeDir(), "park-drive")
+	defaultSyncInterval = 60 * time.Second
+)
+
 type Config struct {
-	IsSetup       bool   `toml:"is_setup"`
-	IsInitialized bool   `toml:"is_initialized"`
-	DriveDir      string `toml:"drive_dir"`
+	LocalDir     string        `toml:"local_dir"`
+	SyncInterval time.Duration `toml:"sync_interval"`
 }
 
-func (c *Config) PersistConfig() error {
-	err := os.MkdirAll(configDirPath(), 0755)
+func Get(ctx context.Context) (Config, error) {
+	return get(ctx, false)
+}
+
+func GetInteractive(ctx context.Context) (Config, error) {
+	return get(ctx, true)
+}
+
+func get(ctx context.Context, interactive bool) (Config, error) {
+	d, err := db.New(ctx)
 	if err != nil {
-		return fmt.Errorf("could not create config directory '%s': %s", configDirPath(), err)
+		return Config{}, fmt.Errorf("could not create database: %w", err)
+	}
+	defer d.Close()
+
+	c, err := d.Queries().GetConfig(ctx)
+	if err != nil {
+		return Config{}, fmt.Errorf("could not get config from database: %w", err)
 	}
 
-	f, err := os.OpenFile(configPath(), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("could not open config file for writing '%s': %s", configPath(), err)
+	config := Config{}
+	config.LocalDir = c.RootDir
+	config.SyncInterval = time.Duration(c.SyncInterval) * time.Second
+	if config.isNotInitialized() {
+		config, err = initConfig(ctx, interactive)
+		if err != nil {
+			return Config{}, fmt.Errorf("could not initialize config: %w", err)
+		}
 	}
 
-	logging.LogDebugf("Persisting config file to '%s'", configPath())
-	err = toml.NewEncoder(f).Encode(c)
+	return config, nil
+}
+
+func initConfig(ctx context.Context, interactive bool) (Config, error) {
+	c := initialConfig()
+	if interactive {
+		err := guidedInitialization(&c)
+		if err != nil {
+			return c, fmt.Errorf("could not initialize config interactively: %w", err)
+		}
+	}
+	return c, c.persist(ctx)
+}
+
+func (c *Config) persist(ctx context.Context) error {
+	d, err := db.New(ctx)
 	if err != nil {
-		return fmt.Errorf("could not persist config to file '%s': %s", configPath(), err)
+		return fmt.Errorf("could not create database: %w", err)
+	}
+	defer d.Close()
+
+	err = d.Queries().UpsertConfig(ctx, sqlc.UpsertConfigParams{
+		RootDir:      c.LocalDir,
+		SyncInterval: int64(c.SyncInterval.Seconds()),
+	})
+	if err != nil {
+		return fmt.Errorf("could not persist config: %w", err)
 	}
 	return nil
 }
 
-func LoadConfig() (Config, error) {
-	c := Config{}
-	f, err := os.Open(configPath())
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		return c, nil
-	case err != nil:
-		return c, fmt.Errorf("could not open config file for reading '%s': %s", configPath(), err)
-	}
-
-	_, err = toml.NewDecoder(f).Decode(&c)
-	if err != nil {
-		return c, fmt.Errorf("could not decode config file '%s': %s", configPath(), err)
-	}
-	return c, nil
+func initialConfig() Config {
+	return Config{SyncInterval: defaultSyncInterval, LocalDir: defaultDriveDir}
 }
 
-func configPath() string {
-	return filepath.Join(configDirPath(), "config.toml")
-}
-
-func configDirPath() string {
-	return util.HomeDir() + "/.config/park"
+func (c *Config) isNotInitialized() bool {
+	return c.LocalDir == ""
 }
