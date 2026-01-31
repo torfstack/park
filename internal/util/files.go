@@ -11,6 +11,11 @@ func HomeDir() string {
 	return h
 }
 
+// ConfigDir returns the path to the park config directory.
+func ConfigDir() string {
+	return filepath.Join(HomeDir(), ".config", "park")
+}
+
 // OpenWithParents opens a file at the given path with the given flag and creates all parent directories if necessary.
 func OpenWithParents(path string, flag int, perm os.FileMode) (*os.File, error) {
 	dir := filepath.Dir(path)
@@ -31,7 +36,7 @@ func WriteFile(path string, data []byte) error {
 
 // CreateTempDir creates a temporary directory with a prefix of "park-"
 func CreateTempDir() (string, error) {
-	dir, err := os.MkdirTemp("", "park-")
+	dir, err := os.MkdirTemp(ConfigDir(), "park-")
 	if err != nil {
 		return "", err
 	}
